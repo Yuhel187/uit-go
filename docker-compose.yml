@@ -1,0 +1,98 @@
+services:
+  pg_user:
+    image: postgres:16-alpine
+    container_name: pg_user
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: userdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_user_data:/var/lib/postgresql/data
+
+  pg_trip:
+    image: postgres:16-alpine
+    container_name: pg_trip
+    restart: always
+    environment:
+      POSTGRES_USER: trip
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: tripdb
+    ports:
+      - "5433:5432"
+    volumes:
+      - pg_trip_data:/var/lib/postgresql/data
+
+  pg_driver:
+    image: postgres:16-alpine
+    container_name: pg_driver
+    restart: always
+    environment:
+      POSTGRES_USER: driver
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: driverdb
+    ports:
+      - "5434:5432"
+    volumes:
+      - pg_driver_data:/var/lib/postgresql/data
+
+  redis:
+    image: redis:7-alpine
+    container_name: redis
+    restart: always
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  # === Services ===
+  user-service:
+    build: ./services/user-service
+    container_name: user-service
+    restart: always
+    depends_on:
+      - pg_user
+    environment:
+      DATABASE_URL: postgres://user:admin@pg_user:5432/userdb
+      JWT_SECRET: supersecret
+      PORT: 3000
+    ports:
+      - "3000:3000"
+
+  driver-service:
+    build: ./services/driver-service
+    container_name: driver-service
+    restart: always
+    depends_on:
+      - pg_driver
+      - redis
+    environment:
+      DATABASE_URL: postgres://driver:admin@pg_driver:5432/driverdb
+      REDIS_URL: redis://redis:6379
+      PORT: 4000
+    ports:
+      - "4000:4000"
+
+  trip-service:
+    build: ./services/trip-service
+    container_name: trip-service
+    restart: always
+    depends_on:
+      - pg_trip
+      - driver-service
+      - redis
+    environment:
+      DATABASE_URL: postgres://trip:admin@pg_trip:5432/tripdb
+      DRIVER_SERVICE_URL: http://driver-service:4000
+      REDIS_URL: redis://redis:6379
+      PORT: 3001
+    ports:
+      - "3001:3001"
+
+volumes:
+  pg_user_data:
+  pg_trip_data:
+  pg_driver_data:
+  redis_data:
