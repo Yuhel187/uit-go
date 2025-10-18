@@ -1,0 +1,29 @@
+import 'dotenv/config';
+import { clearOnlinePresence, setLastLocation, setLastSeen, setOnlinePresence } from './repo';
+
+const ONLINE_TTL_SECONDS = Number(process.env.ONLINE_TTL_SECONDS ?? 35);
+
+export type DriverStatus = 'ONLINE' | 'OFFLINE';
+
+export async function updateLocationService(
+  id: string,
+  lat: number,
+  lng: number,
+  status: DriverStatus
+) {
+  if (status === 'OFFLINE') {
+    await Promise.all([
+      clearOnlinePresence(id),
+      setLastSeen(id),
+      setLastLocation(id, lat, lng),
+    ]);
+    return { id, status: 'OFFLINE' as const };
+  }
+
+  await Promise.all([
+    setOnlinePresence(id, ONLINE_TTL_SECONDS),
+    setLastSeen(id),
+    setLastLocation(id, lat, lng),
+  ]);
+  return { id, status: 'ONLINE' as const };
+}

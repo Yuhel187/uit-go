@@ -1,6 +1,6 @@
 import express from 'express';
 import { redis } from './redis';  
-
+import { api } from './api';
 export const app = express();
 app.set('trust proxy', true);
 app.use(express.json());
@@ -13,3 +13,4 @@ app.get('/health', async (_req, res) => {
     return res.json({ ok: true, service: 'driver', redis: 'down' });
   }
 });
+app.use('/', api);
