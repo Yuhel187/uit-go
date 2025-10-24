@@ -51,8 +51,8 @@ services:
       SMTP_HOST: smtp.gmail.com
       SMTP_PORT: "587"
       SMTP_USER: khainq205@gmail.com       
-      SMTP_PASS: "llip fqih mwiy rrwu"    
-      SMTP_FROM: no-reply@gmail.com
+      SMTP_PASS: "llipfqihmwiyrrwu"    
+      SMTP_FROM: khainq205@gmail.com
 
     ports:
       - "3000:3000"
@@ -76,11 +76,11 @@ services:
       - redis
     environment:
       DATABASE_URL: postgres://trip:admin@pg_trip:5432/tripdb
-      DRIVER_SERVICE_URL: http://driver-service:4000
+      DRIVER_SERVICE_URL: http://driver-service:3001
       REDIS_URL: redis://redis:6379
-      PORT: 3001
+      PORT: 3002
     ports:
-      - "3001:3001"
+      - "3002:3002"
 
 volumes:
   pg_user_data:

@@ -9,7 +9,7 @@ const from = process.env.SMTP_FROM || user;
 const appName = process.env.APP_NAME || 'UIT-GO';
 const supportEmail = process.env.SUPPORT_EMAIL || from;
 const logoUrl = process.env.LOGO_URL || ''; 
-
+const frontendUrl = process.env.FRONTEND_URL || null
 if (!user || !pass) {
   console.warn('SMTP_USER or SMTP_PASS not set — emails will fail');
 }
@@ -43,7 +43,7 @@ function escapeHtml(unsafe) {
 export async function sendOtpEmail(to, otp, options = {}) {
   const name = options.name ? escapeHtml(options.name) : '';
   const expiresMinutes = options.expiresMinutes ?? 10;
-  const verifyUrl = options.verifyUrl || (frontendUrl ? `${frontendUrl.replace(/\/$/, '')}/verify-email?email=${encodeURIComponent(to)}` : null);
+  const verifyUrl = options.verifyUrl || null;
 
   const subject = `${appName} — Mã xác thực email (OTP)`;
 
