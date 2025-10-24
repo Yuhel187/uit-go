@@ -1,5 +1,6 @@
 import 'dotenv/config';
-import { clearOnlinePresence, setLastLocation, setLastSeen, setOnlinePresence } from './repo';
+import { clearOnlinePresence, setLastLocation, setLastSeen, setOnlinePresence,
+         addDriverLocationToGeo, removeDriverFromGeo } from './repo';
 
 const ONLINE_TTL_SECONDS = Number(process.env.ONLINE_TTL_SECONDS ?? 35);
 
@@ -16,6 +17,7 @@ export async function updateLocationService(
       clearOnlinePresence(id),
       setLastSeen(id),
       setLastLocation(id, lat, lng),
+      removeDriverFromGeo(id)
     ]);
     return { id, status: 'OFFLINE' as const };
   }
@@ -24,6 +26,7 @@ export async function updateLocationService(
     setOnlinePresence(id, ONLINE_TTL_SECONDS),
     setLastSeen(id),
     setLastLocation(id, lat, lng),
+    addDriverLocationToGeo(id,lng,lat)
   ]);
   return { id, status: 'ONLINE' as const };
 }
