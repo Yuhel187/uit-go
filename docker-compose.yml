@@ -32,20 +32,7 @@ services:
       - "5433:5432"
     volumes:
       - pg_trip_data:/var/lib/postgresql/data
-
-  pg_driver:
-    image: postgres:16-alpine
-    container_name: pg_driver
-    restart: always
-    environment:
-      POSTGRES_USER: driver
-      POSTGRES_PASSWORD: admin
-      POSTGRES_DB: driverdb
-    ports:
-      - "5434:5432"
-    volumes:
-      - pg_driver_data:/var/lib/postgresql/data
-
+      
   # === Services ===
   user-service:
     build: ./services/user-service
