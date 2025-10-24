@@ -34,13 +34,6 @@ logs/
 coverage/
 .nyc_output/
 
-# =========================
-# Docker & containers
-# =========================
-Dockerfile*
-docker-compose.override.yml
-# ignore local build context cache
-**/.docker/
 
 # =========================
 # Redis / runtime data
