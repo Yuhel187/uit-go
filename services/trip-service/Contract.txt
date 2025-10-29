@@ -1,0 +1,62 @@
+Hợp đồng API (API Contract)
+Tất cả các API đều cần xác thực (Auth) bằng JWT (từ user-service).
+
+API cho Hành khách (Passenger)
+
+[HK2] Yêu cầu chuyến đi
+POST /api/trips
+Auth: Passenger
+Body: { "from_lat": 10.123, "from_lng": 106.456, "to_lat": 10.789, "to_lng": 106.789 }
+Response (201): { "id": "...", "status": "SEARCHING", "price_estimate": 50000, ... }
+
+
+[HK4] Hủy chuyến đi 
+POST /api/trips/{id}/cancel
+Auth: Passenger
+Response (200): { "id": "...", "status": "CANCELLED", ... }
+
+[HK5] Đánh giá chuyến đi
+POST /api/trips/{id}/rating
+Auth: Passenger
+Body: { "rating": 5, "comment": "Tài xế thân thiện" }
+Response (201): { "id": "...", "rating": 5, ... }
+
+
+[Chung] Lấy thông tin chuyến đi 
+GET /api/trips/{id}
+Auth: Passenger (hoặc Driver liên quan đến chuyến)
+Response (200): { "id": "...", "status": "ACCEPTED", "driverId": 123, "passengerId": 456, ... }
+
+
+
+
+API cho Tài xế (Driver)
+
+[TX3] Chấp nhận chuyến đi
+POST /api/trips/{id}/accept
+Auth: Driver
+Response (200): { "id": "...", "status": "ACCEPTED", ... }
+
+[TX3] Từ chối chuyến đi
+POST /api/trips/{id}/reject
+Auth: Driver
+Response (200): { "id": "...", "status": "SEARCHING" } (Chuyến đi quay lại trạng thái tìm kiếm)
+
+[TX-Sub] Bắt đầu chuyến đi (Đón khách)
+POST /api/trips/{id}/start
+Auth: Driver
+Response (200): { "id": "...", "status": "IN_PROGRESS", ... }
+
+[TX5] Hoàn thành chuyến đi
+POST /api/trips/{id}/complete
+Auth: Driver
+Response (200): { "id": "...", "status": "COMPLETED", ... }
+
+
+API Kênh thời gian thực (WebSocket)
+
+Server Namespace: /trips
+Sự kiện Server -> Client (Driver):
+trip:request: Gửi yêu cầu chuyến đi mới (gồm chi tiết) cho tài xế.
+Sự kiện Server -> Client (Passenger):
+trip:update: Gửi cập nhật trạng thái (status, driver_location) cho hành khách.
