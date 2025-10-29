@@ -1,0 +1,88 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+/**
+ * UserService schema:
+ * - model User: lưu account (email, password hashed), role (PASSENGER/DRIVER/ADMIN),
+ * profile cơ bản (name, phone), verify flag, lastLogin.
+ * - model RefreshToken: lưu refresh tokens (nếu cần implement refresh JWT).
+ * - model EmailVerification: optional token for email verification / password reset.
+ */
+
+enum Role {
+  PASSENGER
+  DRIVER
+  ADMIN
+}
+
+model User {
+  id            Int                 @id @default(autoincrement())
+  email         String              @unique
+  password      String
+  name          String?
+  phone         String?
+  vehicle       Vehicle?
+  role          Role                @default(PASSENGER)
+  isVerified    Boolean             @default(false)
+  isActive      Boolean             @default(true)
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+  lastLoginAt   DateTime?
+  // relations
+  refreshTokens RefreshToken[]
+  verifications EmailVerification[]
+
+  @@map("users")
+}
+
+model Vehicle {
+  id           Int    @id @default(autoincrement())
+  model        String
+  licensePlate String @unique
+  color        String
+
+  user   User @relation(fields: [userId], references: [id])
+  userId Int  @unique
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+}
+
+model RefreshToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  revoked   Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("refresh_tokens")
+}
+
+model EmailVerification {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  userId    Int
+  type      String // "email_verify" | "password_reset"
+  used      Boolean  @default(false)
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  @@map("email_verifications")
+}

@@ -1,0 +1,90 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+
+  pg_user:
+    image: postgres:16-alpine
+    container_name: pg_user
+    restart: always
+    environment:
+      POSTGRES_USER: user
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: userdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_user_data:/var/lib/postgresql/data
+
+  pg_trip:
+    image: postgres:16-alpine
+    container_name: pg_trip
+    restart: always
+    environment:
+      POSTGRES_USER: trip
+      POSTGRES_PASSWORD: admin
+      POSTGRES_DB: tripdb
+    ports:
+      - "5433:5432"
+    volumes:
+      - pg_trip_data:/var/lib/postgresql/data
+      
+  # === Services ===
+  user-service:
+    build: ./services/user-service
+    container_name: user-service
+    restart: always
+    depends_on:
+      - pg_user
+      - redis
+    environment:
+      DATABASE_URL: postgres://user:admin@pg_user:5432/userdb
+      JWT_SECRET: supersecret
+      PORT: 3000
+
+      REDIS_URL: redis://redis:6379
+      # SMTP (Google App Password)
+      SMTP_HOST: smtp.gmail.com
+      SMTP_PORT: "587"
+      SMTP_USER: khainq205@gmail.com       
+      SMTP_PASS: "llipfqihmwiyrrwu"    
+      SMTP_FROM: khainq205@gmail.com
+
+    ports:
+      - "3000:3000"
+
+  driver-service:
+    build: ./services/driver-service
+    env_file: ./services/driver-service/.env
+    ports:
+      - "3001:3001"
+    depends_on:
+      - redis
+    restart: unless-stopped
+
+  trip-service:
+    build: ./services/trip-service
+    container_name: trip-service
+    restart: always
+    depends_on:
+      - pg_trip
+      - driver-service
+      - redis
+    environment:
+      DATABASE_URL: postgres://trip:admin@pg_trip:5432/tripdb
+      DRIVER_SERVICE_URL: http://driver-service:3001
+      REDIS_URL: redis://redis:6379
+      PORT: 3002
+    ports:
+      - "3002:3002"
+
+volumes:
+  pg_user_data:
+  pg_trip_data:
+  pg_driver_data:
+  redis_data: {}
+  redisinsight_data:
