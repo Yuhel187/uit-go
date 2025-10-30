@@ -78,6 +78,7 @@ services:
       DATABASE_URL: postgres://trip:admin@pg_trip:5432/tripdb
       DRIVER_SERVICE_URL: http://driver-service:3001
       REDIS_URL: redis://redis:6379
+      JWT_SECRET: supersecret
       PORT: 3002
     ports:
       - "3002:3002"

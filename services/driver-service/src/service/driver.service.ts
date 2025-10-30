@@ -26,7 +26,7 @@ export async function updateLocationService(
     setOnlinePresence(id, ONLINE_TTL_SECONDS),
     setLastSeen(id),
     setLastLocation(id, lat, lng),
-    addDriverLocationToGeo(id,lng,lat)
+    addDriverLocationToGeo(id,lat,lng)
   ]);
   return { id, status: 'ONLINE' as const };
 }
