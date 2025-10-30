@@ -1,95 +1,54 @@
-// 1. Khai báo CSDL (PostgreSQL)
-
 datasource db {
     provider = "postgresql"
 
-    url = env("DATABASE_URL") // postgres://trip:admin@pg_trip:5432/tripdb
+    url = env("DATABASE_URL")
 }
 
 generator client {
     provider = "prisma-client-js"
 }
 
-// 2. Định nghĩa ENUM cho trạng thái chuyến đi
-
 enum TripStatus {
     SEARCHING // Đang tìm tài xế [HK2]
-
     DRIVER_FOUND // Đã tìm thấy, đang chờ tài xế xác nhận [TX3]
-
     ACCEPTED // Tài xế đã chấp nhận, đang đến đón [TX3]
-
     IN_PROGRESS // Tài xế đã đón khách, đang trong chuyến đi [TX4]
-
     COMPLETED // Chuyến đi đã hoàn thành [TX5]
-
     CANCELLED // Chuyến đi đã bị hủy [HK4]
 }
 
-// 3. Bảng `trips`: Trái tim của dịch vụ
-
 model Trip {
-    id String @id @default(cuid()) // Dùng CUID (hoặc UUID) tốt hơn cho hệ thống phân tán
-
-    status TripStatus @default(SEARCHING)
-
-    // ID người dùng (từ UserService)
-
-    passengerId Int // ID của hành khách
-
-    driverId Int? // ID của tài xế (nullable, vì lúc đầu chưa có)
-
+    id              String     @id @default(cuid())
+    status          TripStatus @default(SEARCHING)
+    passengerId     Int
+    driverId        Int?
     // Thông tin điểm đón (từ HK2)
-
     fromLocationLat Float
-
     fromLocationLng Float
-
-    fromAddress String? // Tên địa điểm (optional)
-
+    fromAddress     String? // Tên địa điểm (optional)
     // Thông tin điểm đến (từ HK2)
-
-    toLocationLat Float
-
-    toLocationLng Float
-
-    toAddress String? // Tên địa điểm (optional)
-
+    toLocationLat   Float
+    toLocationLng   Float
+    toAddress       String? // Tên địa điểm (optional)
     // Thông tin giá cước (từ HK2)
-
-    priceEstimate Decimal @db.Decimal(10, 2) // Giá cước ước tính
-
+    priceEstimate   Decimal    @db.Decimal(10, 2)
     // Mối quan hệ với Rating (cho HK5)
-
-    rating Rating?
-
-    // Dấu thời gian
-
-    createdAt DateTime @default(now())
-
-    updatedAt DateTime @updatedAt
+    rating          Rating?
+    createdAt       DateTime   @default(now())
+    updatedAt       DateTime   @updatedAt
 
     @@map("trips")
 }
 
-// 4. Bảng `ratings`: Lưu đánh giá (cho HK5)
-
 model Rating {
-    id String @id @default(cuid())
-
-    tripId String @unique // 1 chuyến đi chỉ có 1 đánh giá
-
-    trip Trip @relation(fields: [tripId], references: [id])
-
+    id          String   @id @default(cuid())
+    tripId      String   @unique
+    trip        Trip     @relation(fields: [tripId], references: [id])
     passengerId Int
-
-    driverId Int
-
-    rating Int // Từ 1-5 sao 
-
-    comment String? // Bình luận 
-
-    createdAt DateTime @default(now())
+    driverId    Int
+    rating      Int // Từ 1-5 sao 
+    comment     String?
+    createdAt   DateTime @default(now())
 
     @@map("ratings")
 }
