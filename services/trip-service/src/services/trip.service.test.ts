@@ -16,6 +16,10 @@ vi.mock('./prisma.client', () => {
       rating: {
         create: vi.fn(),
       },
+      tripRejectedDriver: {
+        findMany: vi.fn(),
+        create: vi.fn(),
+      },
     },
   };
 });

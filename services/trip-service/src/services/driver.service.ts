@@ -22,16 +22,26 @@ interface DriverSearchResponse {
  * @param lng Kinh độ điểm đón
  * @returns Thông tin tài xế gần nhất hoặc null nếu không tìm thấy.
  */
-export async function findClosestDriver(lat: number, lng: number): Promise<DriverSearchResult | null> {
+export async function findClosestDriver(
+  lat: number, 
+  lng: number, 
+  excludeDriverIds: number[] = [] // ⭐️ THÊM THAM SỐ NÀY
+): Promise<DriverSearchResult | null> {
   try {
+    // ⭐️ Chuẩn bị params động
+    const params: any = {
+      lat,
+      lng,
+      radius: 5,
+      unit: 'km',
+    };
+    if (excludeDriverIds.length > 0) {
+      params.excludeDriverIds = excludeDriverIds.join(',');
+    }
+
     // Tìm trong bán kính 5km (giống default của driver-service)
     const { data } = await driverServiceApi.get<DriverSearchResponse>('/drivers/search', {
-      params: {
-        lat,
-        lng,
-        radius: 5,
-        unit: 'km',
-      },
+      params: params, 
     });
 
     // Nếu có tài xế và tài xế đầu tiên (gần nhất) tồn tại

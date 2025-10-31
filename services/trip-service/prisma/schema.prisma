@@ -36,8 +36,20 @@ model Trip {
     rating          Rating?
     createdAt       DateTime   @default(now())
     updatedAt       DateTime   @updatedAt
+    rejectedDrivers TripRejectedDriver[]
 
     @@map("trips")
+}
+model TripRejectedDriver {
+  id        Int      @id @default(autoincrement())
+  tripId    String
+  driverId  Int
+  createdAt DateTime @default(now())
+
+  trip      Trip     @relation(fields: [tripId], references: [id])
+  // driver    User     @relation(fields: [driverId], references: [id]) // Nếu có model User/Driver
+
+  @@unique([tripId, driverId]) 
 }
 
 model Rating {
