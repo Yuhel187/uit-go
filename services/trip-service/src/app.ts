@@ -1,13 +1,18 @@
 import express from 'express';
-// 1. Sửa import: Trỏ đến file router chính (src/index.ts)
+import { createServer } from 'http';
+import { WebSocketGateway } from './services/websocket.gateway';
 import mainRouter from './index'; 
 import { notFound, errorHandler } from './middlewares/error.handler';
-import { z } from 'zod'; // Import Zod
+import { z } from 'zod'; 
 
 const app = express();
+const httpServer = createServer(app);
+
+const wsGateway = new WebSocketGateway(httpServer);
+wsGateway.initialize();
 
 app.use(express.json());
-app.use('/api', mainRouter);
+app.use(mainRouter);
 
 // --- Error Handling ---
 
@@ -27,6 +32,6 @@ app.use(errorHandler);
 
 const PORT = process.env.PORT || 3002; 
 
-app.listen(PORT, () => {
-  console.log(`[TripService] Server listening on port ${PORT}`);
+httpServer.listen(PORT, () => {
+  console.log(`[TripService] Server (HTTP + WebSocket) listening on port ${PORT}`);
 });

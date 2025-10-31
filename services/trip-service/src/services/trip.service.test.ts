@@ -2,6 +2,7 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { TripStatus } from '@prisma/client';
 
+              //FILE NÀY CHỈ ĐỂ TEST CÁC SERVICE KHÔNG PHỤ THUỘC VÀO EXPRESS
 // ⭐️ 1. Mock 'prisma.client' TRƯỚC TIÊN
 vi.mock('./prisma.client', () => {
   return {

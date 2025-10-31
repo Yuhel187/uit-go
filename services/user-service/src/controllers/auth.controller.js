@@ -11,7 +11,7 @@ const PASSWORD_REGEX = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@
 
 // Các hằng số
 const SALT_ROUNDS = 10;
-const ACCESS_EXPIRES = '15m';
+const ACCESS_EXPIRES = '45m';
 const REFRESH_EXPIRES_DAYS = 30;
 const OTP_TTL = 60 * 10; // 10 minutes
 const RESEND_COOLDOWN = 60; // seconds

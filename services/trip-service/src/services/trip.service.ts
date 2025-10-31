@@ -1,7 +1,9 @@
 import { Prisma, Trip, TripStatus } from '@prisma/client';
 import { prisma } from './prisma.client';
+import { findClosestDriver } from './driver.service';
+import { appEmitter, EmitterEvents } from '../lib/emitter';
 
-interface AuthUser {
+export interface AuthUser {
   id: number;
   role: 'PASSENGER' | 'DRIVER';
 }
@@ -9,25 +11,6 @@ interface AuthUser {
 type TripWithRating = Prisma.TripGetPayload<{
   include: { rating: true }
 }>
-
-// P2 sẽ cung cấp công cụ này từ: src/integration/clients/driver.client.ts
-const driverClient = {
-  findNearbyDrivers: async (lat: number, lng: number): Promise<{ id: number } | null> => {
-    console.log(`[P1-Debug] Giả lập gọi API tìm tài xế ở ${lat},${lng}`);
-    return { id: 789 }; 
-  }
-};
-
-// P2 sẽ cung cấp công cụ này từ: src/integration/gateways/websocket.gateway.ts
-const websocketGateway = {
-  notifyDriverOfNewTrip: async (driverId: number, trip: Trip) => {
-    console.log(`[P1-Debug] Giả lập phát WS 'trip:request' cho tài xế ${driverId}`);
-  },
-  notifyPassengerOfUpdate: async (passengerId: number, trip: Trip) => {
-    console.log(`[P1-Debug] Giả lập phát WS 'trip:update' cho hành khách ${passengerId}`);
-  }
-};
-
 
 class TripService {
 
@@ -96,7 +79,7 @@ class TripService {
     });
 
     // 4. [ĐIỀU PHỐI] Báo cho hành khách
-    await websocketGateway.notifyPassengerOfUpdate(updatedTrip.passengerId, updatedTrip);
+    appEmitter.emit(EmitterEvents.NOTIFY_PASSENGER, updatedTrip.passengerId, updatedTrip);
 
     return updatedTrip;
   }
@@ -142,7 +125,7 @@ class TripService {
     });
     
     // 4. [ĐIỀU PHỐI] Báo cho hành khách
-    await websocketGateway.notifyPassengerOfUpdate(updatedTrip.passengerId, updatedTrip);
+    appEmitter.emit(EmitterEvents.NOTIFY_PASSENGER, updatedTrip.passengerId, updatedTrip);
     return updatedTrip;
   }
   
@@ -162,7 +145,7 @@ class TripService {
     });
     
     // 4. [ĐIỀU PHỐI] Báo cho hành khách
-    await websocketGateway.notifyPassengerOfUpdate(updatedTrip.passengerId, updatedTrip);
+    appEmitter.emit(EmitterEvents.NOTIFY_PASSENGER, updatedTrip.passengerId, updatedTrip);
     return updatedTrip;
   }
 
@@ -187,8 +170,7 @@ class TripService {
     
     // 4. [ĐIỀU PHỐI] Báo cho tài xế (nếu có)
     if (updatedTrip.driverId) {
-      // (Báo cho tài xế qua WebSocket rằng chuyến đã bị hủy)
-      // await websocketGateway.notifyDriverOfUpdate(updatedTrip.driverId, updatedTrip);
+       appEmitter.emit(EmitterEvents.NOTIFY_DRIVER, updatedTrip.driverId, updatedTrip);
     }
     return updatedTrip;
   }
@@ -252,7 +234,7 @@ class TripService {
    */
   private async findAndAssignDriver(trip: Trip) {
     // 1. [ĐIỀU PHỐI]
-    const driver = await driverClient.findNearbyDrivers(
+    const driver = await findClosestDriver(
       trip.fromLocationLat,
       trip.fromLocationLng
     );
@@ -262,13 +244,13 @@ class TripService {
       const updatedTrip = await prisma.trip.update({
         where: { id: trip.id },
         data: {
-          driverId: driver.id,
+          driverId: Number(driver.id),
           status: TripStatus.DRIVER_FOUND
         }
       });
       
       // 3. [ĐIỀU PHỐI] Báo cho tài xế
-      await websocketGateway.notifyDriverOfNewTrip(driver.id, updatedTrip);
+      appEmitter.emit(EmitterEvents.NOTIFY_DRIVER, updatedTrip.driverId, updatedTrip);
     } else {
       console.log(`Không tìm thấy tài xế cho chuyến ${trip.id}`);
     }
@@ -290,6 +272,61 @@ class TripService {
     }
     return trip as Prisma.TripGetPayload<{ include: T }>;
   }
+}
+
+/**
+ * Tìm và gán tài xế cho một chuyến đi.
+ * @param trip Chuyến đi đang ở trạng thái 'SEARCHING'.
+ * @returns Chuyến đi đã được cập nhật (có thể vẫn là 'SEARCHING' nếu không tìm thấy tài xế).
+ */
+export async function findAndAssignDriver(trip: Trip): Promise<Trip> {
+  // 1. Gọi DriverService để tìm tài xế
+  const driver = await findClosestDriver(trip.fromLocationLat, trip.fromLocationLng);
+
+  if (!driver) {
+    // Không tìm thấy tài xế, giữ nguyên trạng thái SEARCHING
+    console.log(`[MatchingService] No driver found for trip ${trip.id}`);
+    return trip;
+  }
+
+  // 2. Tìm thấy tài xế -> Cập nhật chuyến đi
+  console.log(`[MatchingService] Found driver ${driver.id} for trip ${trip.id}`);
+  const updatedTrip = await prisma.trip.update({
+    where: { id: trip.id },
+    data: {
+      driverId: Number(driver.id), // Chuyển đổi ID tài xế (string) sang Int
+      status: 'DRIVER_FOUND',
+    },
+  });
+
+  // 3. Gửi WebSocket 'trip:request' cho tài xế
+  // TODO: Emit WebSocket event 'trip:request' to driver (driver.id)
+  appEmitter.emit(EmitterEvents.NOTIFY_DRIVER, updatedTrip.driverId, updatedTrip);
+  console.log(`[MatchingService] Notifying driver ${driver.id} via WebSocket...`);
+
+  return updatedTrip;
+}
+
+/**
+ * Xử lý khi tài xế từ chối và tìm tài xế mới.
+ * @param trip Chuyến đi bị từ chối.
+ * @returns Chuyến đi đã được cập nhật (SEARCHING hoặc DRIVER_FOUND với tài xế mới).
+ */
+export async function rematchDriver(trip: Trip): Promise<Trip> {
+  console.log(`[MatchingService] Driver ${trip.driverId} rejected trip ${trip.id}. Rematching...`);
+  
+  // 1. Set chuyến đi về SEARCHING và xóa driverId
+  // (Một hệ thống thực tế cần lưu lại tài xế đã từ chối để không tìm lại họ)
+  const tripToSearch = await prisma.trip.update({
+    where: { id: trip.id },
+    data: {
+      driverId: null,
+      status: 'SEARCHING',
+    },
+  });
+
+  // 2. Gọi lại hàm tìm tài xế
+  return await findAndAssignDriver(tripToSearch);
 }
 
 export const tripService = new TripService();
