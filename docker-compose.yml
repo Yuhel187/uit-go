@@ -6,6 +6,11 @@ services:
       - "6379:6379"
     volumes:
       - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 1s
+      timeout: 3s
+      retries: 30
 
   pg_user:
     image: postgres:16-alpine
@@ -19,6 +24,11 @@ services:
       - "5432:5432"
     volumes:
       - pg_user_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U user -d userdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
 
   pg_trip:
     image: postgres:16-alpine
@@ -32,6 +42,11 @@ services:
       - "5433:5432"
     volumes:
       - pg_trip_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U trip -d tripdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
       
   # === Services ===
   user-service:
@@ -39,8 +54,10 @@ services:
     container_name: user-service
     restart: always
     depends_on:
-      - pg_user
-      - redis
+      pg_user:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgres://user:admin@pg_user:5432/userdb
       JWT_SECRET: supersecret
@@ -59,11 +76,15 @@ services:
 
   driver-service:
     build: ./services/driver-service
-    env_file: ./services/driver-service/.env
+    environment:
+      PORT: 3001
+      REDIS_URL: redis://redis:6379
+      ONLINE_TTL_SECONDS: 35
     ports:
       - "3001:3001"
     depends_on:
-      - redis
+      redis:
+        condition: service_healthy
     restart: unless-stopped
 
   trip-service:
@@ -71,13 +92,17 @@ services:
     container_name: trip-service
     restart: always
     depends_on:
-      - pg_trip
-      - driver-service
-      - redis
+      pg_trip:
+        condition: service_healthy
+      driver-service:
+        condition: service_started 
+      redis:
+        condition: service_healthy
     environment:
       DATABASE_URL: postgres://trip:admin@pg_trip:5432/tripdb
       DRIVER_SERVICE_URL: http://driver-service:3001
       REDIS_URL: redis://redis:6379
+      JWT_SECRET: supersecret
       PORT: 3002
     ports:
       - "3002:3002"
