@@ -32,6 +32,7 @@ COPY --from=build /app/dist ./dist
 
 COPY --from=build /app/prisma ./prisma/
 
+COPY --from=build /app/node_modules/@prisma/client ./node_modules/@prisma/client
 COPY --from=build /app/node_modules/.prisma ./node_modules/.prisma
 
 EXPOSE 3002
