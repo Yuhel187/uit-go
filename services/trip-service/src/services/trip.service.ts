@@ -19,28 +19,24 @@ class TripService {
     passenger: AuthUser,
     payload: { from_lat: number, from_lng: number, to_lat: number, to_lng: number }
   ) {
-    // 1. [LUẬT] Kiểm tra nghiệp vụ
-    if (passenger.role !== 'PASSENGER') {
-      throw new Error('Chỉ hành khách mới được tạo chuyến đi');
-    }
-
+    // 1. [QUAN TRỌNG] Kiểm tra xem user có đang kẹt trong chuyến khác không
     const existingTrip = await prisma.trip.findFirst({
-    where: {
+      where: {
         passengerId: passenger.id,
-        status: { // Tìm các chuyến đi chưa kết thúc hoặc chưa hủy
-        notIn: [TripStatus.COMPLETED, TripStatus.CANCELLED]
+        status: {
+          notIn: [TripStatus.COMPLETED, TripStatus.CANCELLED]
         }
-    }
+      }
     });
 
     if (existingTrip) {
-    throw new Error('Bạn đang trong một chuyến đi khác.');
+      throw new Error('Bạn đang trong một chuyến đi khác. Vui lòng hoàn thành hoặc hủy nó trước.');
     }
 
-    // 2. [LOGIC] Tính toán (Giả lập)
+    // 2. Tính giá (Mock)
     const priceEstimate = new Prisma.Decimal(50000.00);
 
-    // 3. [CSDL] Tạo chuyến đi
+    // 3. Tạo chuyến đi
     const newTrip = await prisma.trip.create({
       data: {
         passengerId: passenger.id,
@@ -53,10 +49,8 @@ class TripService {
       }
     });
 
-    // 4. [ĐIỀU PHỐI] Tìm tài xế
-    await this.findAndAssignDriver(newTrip);
-
-    return newTrip;
+    // 4. Gọi hàm tìm tài xế (Internal method)
+    return await this.findAndAssignDriver(newTrip);
   }
 
   // ---- [TX3] Chấp nhận chuyến đi ----
@@ -227,32 +221,84 @@ class TripService {
   }
 
 
-  // HÀM NỘI BỘ (Internal)
+  public async findAndAssignDriver(trip: Trip): Promise<Trip> {
+    const rejectedRecords = await prisma.tripRejectedDriver.findMany({
+      where: { tripId: trip.id },
+      select: { driverId: true }
+    });
+    const excludeDriverIds = rejectedRecords.map((r) => r.driverId);
 
-  /**
-   * (Nội bộ) Hàm điều phối tìm và gán tài xế
-   */
-  private async findAndAssignDriver(trip: Trip) {
-    // 1. [ĐIỀU PHỐI]
+    console.log(`[Matching] Trip ${trip.id} needs to exclude drivers: ${excludeDriverIds}`);
     const driver = await findClosestDriver(
       trip.fromLocationLat,
-      trip.fromLocationLng
+      trip.fromLocationLng,
+      excludeDriverIds
     );
 
-    if (driver) {
-      // 2. [CSDL] Gán tài xế
-      const updatedTrip = await prisma.trip.update({
-        where: { id: trip.id },
-        data: {
-          driverId: Number(driver.id),
-          status: TripStatus.DRIVER_FOUND
-        }
+    if (!driver) {
+      console.log(`[Matching] No driver found for trip ${trip.id}`);
+      return trip;
+    }
+    const driverId = Number(driver.id);
+    console.log(`[Matching] Found driver ${driverId} for trip ${trip.id}`);
+
+    const updatedTrip = await prisma.trip.update({
+      where: { id: trip.id },
+      data: {
+        driverId: driverId,
+        status: TripStatus.DRIVER_FOUND,
+      },
+    });
+
+    appEmitter.emit(EmitterEvents.NOTIFY_DRIVER, updatedTrip.driverId, updatedTrip);
+
+    const TIMEOUT_MS = 15000; // Đổi về 15s 
+    setTimeout(() => {
+      this.handleTripTimeout(updatedTrip.id, driverId).catch(err => {
+        console.error(`[Timeout] Error handling timeout:`, err);
       });
+    }, TIMEOUT_MS);
+
+    return updatedTrip;
+  }
+
+  
+  public async rematchDriver(trip: Trip): Promise<Trip> {
+    console.log(`[Matching] Driver ${trip.driverId} rejected trip ${trip.id}. Rematching...`);
+    if (trip.driverId) {
+      await prisma.tripRejectedDriver.create({
+        data: {
+          tripId: trip.id,
+          driverId: trip.driverId
+        }
+      }).catch((err: unknown) => {
+        console.warn('[Matching] Driver already rejected this trip before.');
+      });
+    }
+    const tripToSearch = await prisma.trip.update({
+      where: { id: trip.id },
+      data: { driverId: null, status: 'SEARCHING' },
+    });
+    return await this.findAndAssignDriver(tripToSearch);
+  }
+  private async handleTripTimeout(tripId: string, expectedDriverId: number) {
+    console.log(`[Timeout] Checking trip ${tripId} for driver ${expectedDriverId}`);
+
+    // 1. Lấy trạng thái MỚI NHẤT
+    const trip = await prisma.trip.findUnique({
+      where: { id: tripId },
+    });
+    if (
+      trip &&
+      trip.status === TripStatus.DRIVER_FOUND &&
+      trip.driverId === expectedDriverId
+    ) {
+      console.log(`[Timeout] Driver ${expectedDriverId} timed out. Rematching trip ${tripId}.`);
       
-      // 3. [ĐIỀU PHỐI] Báo cho tài xế
-      appEmitter.emit(EmitterEvents.NOTIFY_DRIVER, updatedTrip.driverId, updatedTrip);
+      await this.rematchDriver(trip);
+      
     } else {
-      console.log(`Không tìm thấy tài xế cho chuyến ${trip.id}`);
+      console.log(`[Timeout] No action needed for trip ${tripId}. (Current status: ${trip?.status})`);
     }
   }
 
@@ -272,114 +318,6 @@ class TripService {
     }
     return trip as Prisma.TripGetPayload<{ include: T }>;
   }
-}
-async function handleTripTimeout(tripId: string, expectedDriverId: number) {
-  console.log(`[Timeout] Checking trip ${tripId} for driver ${expectedDriverId}`);
-
-  // 1. Lấy trạng thái MỚI NHẤT của chuyến đi
-  const trip = await prisma.trip.findUnique({
-    where: { id: tripId },
-  });
-
-  // 2. Kiểm tra xem có cần tự động từ chối không
-  if (
-    trip &&
-    trip.status === TripStatus.DRIVER_FOUND &&
-    trip.driverId === expectedDriverId
-  ) {
-    // Tài xế đã không làm gì cả trong 15s.
-    // Coi như tài xế vừa bấm "Từ chối" và tìm người mới.
-    console.log(`[Timeout] Driver ${expectedDriverId} timed out. Rematching trip ${tripId}.`);
-    
-    await rematchDriver(trip);
-    
-  } else {
-    console.log(`[Timeout] No action needed for trip ${tripId}. (Current status: ${trip?.status})`);
-  }
-}
-/**
- * Tìm và gán tài xế cho một chuyến đi.
- * @param trip Chuyến đi đang ở trạng thái 'SEARCHING'.
- * @returns Chuyến đi đã được cập nhật (có thể vẫn là 'SEARCHING' nếu không tìm thấy tài xế).
- */
-export async function findAndAssignDriver(trip: Trip): Promise<Trip> {
-  // 1.Lấy danh sách TẤT CẢ tài xế đã từ chối chuyến
-  const rejectedRecords = await prisma.tripRejectedDriver.findMany({
-    where: { tripId: trip.id },
-    select: { driverId: true }
-  });
-  const excludeDriverIds = rejectedRecords.map((r: { driverId: number }) => r.driverId);
-
-  console.log(`[Matching] Trip ${trip.id} needs to exclude drivers: ${excludeDriverIds}`);
-
-  // 2. Gọi DriverService với danh sách loại trừ
-  const driver = await findClosestDriver(
-    trip.fromLocationLat, 
-    trip.fromLocationLng, 
-    excludeDriverIds 
-  );
-
-  if (!driver) {
-    console.log(`[Matching] No driver found for trip ${trip.id}`);
-    return trip;
-  }
-
-  // 3. Tìm thấy -> Gán tài xế
-  console.log(`[Matching] Found driver ${driver.id} for trip ${trip.id}`);
-  
-  const driverId = Number(driver.id);
-
-  const updatedTrip = await prisma.trip.update({
-    where: { id: trip.id },
-    data: {
-      driverId: driverId, 
-      status: 'DRIVER_FOUND',
-    },
-  });
-
-  // 4. Notify driver
-  appEmitter.emit(EmitterEvents.NOTIFY_DRIVER, updatedTrip.driverId, updatedTrip);
-  //Tạm thời để 1 phút để dễ test
-  //Todo : chỉnh lại 15s trong production
-  const TIMEOUT_MS = 60000;
-  setTimeout(() => {
-    handleTripTimeout(updatedTrip.id, driverId).catch(err => { // ⭐️ Dùng biến driverId
-      console.error(`[Timeout] Error handling timeout for trip ${updatedTrip.id}:`, err);
-    });
-  }, TIMEOUT_MS);
-  
-  console.log(`[Matching] Notified driver ${driverId}. Set 15s timeout.`);
-
-  return updatedTrip;
-}
-/**
- * Xử lý khi tài xế từ chối và tìm tài xế mới.
- * @param trip Chuyến đi bị từ chối.
- * @returns Chuyến đi đã được cập nhật (SEARCHING hoặc DRIVER_FOUND với tài xế mới).
- */
-export async function rematchDriver(trip: Trip): Promise<Trip> {
-  console.log(`[Matching] Driver ${trip.driverId} rejected trip ${trip.id}. Rematching...`);
-
-  // 1. [MỚI] Ghi nhận việc từ chối vào DB
-  if (trip.driverId) {
-    await prisma.tripRejectedDriver.create({
-      data: {
-        tripId: trip.id,
-        driverId: trip.driverId
-      }
-    }).catch((err: unknown) => {
-      // Bắt lỗi nếu record đã tồn tại (do unique constraint) để không crash app
-      console.warn('[Matching] Driver already rejected this trip before.');
-    });
-  }
-
-  // 2. Reset chuyến đi & tìm người mới
-  const tripToSearch = await prisma.trip.update({
-    where: { id: trip.id },
-    data: { driverId: null, status: 'SEARCHING' },
-  });
-
-  return await findAndAssignDriver(tripToSearch);
 }
 
 export const tripService = new TripService();

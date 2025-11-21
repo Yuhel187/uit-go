@@ -3,7 +3,7 @@ import { prisma } from '../services/prisma.client';
 import { z } from 'zod';
 import { tripService } from '../services/trip.service';
 import { Trip } from '@prisma/client';
-import { findAndAssignDriver, rematchDriver, AuthUser } from '../services/trip.service';
+import {  AuthUser } from '../services/trip.service';
 
 // --- Zod Schemas để Validate ---
 
@@ -34,25 +34,12 @@ const rateTripSchema = z.object({
  */
 export async function requestTrip(req: Request, res: Response, next: NextFunction) {
   try {
-    // req.user được gán từ middleware auth
-    const { id: passengerId } = req.user!;
+    // 1. Lấy thông tin User và Body
+    const authUser = req.user as AuthUser;
     const body = createTripSchema.parse(req.body);
 
-    // mock giá ước tính
-    const priceEstimate = 50000.00; 
-
-    let trip = await prisma.trip.create({
-      data: {
-        passengerId: passengerId,
-        status: 'SEARCHING',
-        fromLocationLat: body.from_lat,
-        fromLocationLng: body.from_lng,
-        toLocationLat: body.to_lat,
-        toLocationLng: body.to_lng,
-        priceEstimate: priceEstimate,
-      },
-    });
-    trip = await findAndAssignDriver(trip);
+    // 2. GỌI SERVICE
+    const trip = await tripService.createTrip(authUser, body);
 
     res.status(201).json(trip);
     
@@ -128,7 +115,7 @@ export async function rejectTrip(req: Request, res: Response, next: NextFunction
     if (trip.driverId !== driverId) {
       return res.status(403).json({ error: 'Forbidden: You are not assigned to this trip' });
     }
-    const rematchedTrip = await rematchDriver(trip);
+    const rematchedTrip = await tripService.rematchDriver(trip);
     res.json(rematchedTrip);
 
   } catch (error) {
