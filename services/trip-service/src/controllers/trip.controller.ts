@@ -55,34 +55,12 @@ export async function requestTrip(req: Request, res: Response, next: NextFunctio
  */
 export async function acceptTrip(req: Request, res: Response, next: NextFunction) {
   try {
-    const { id: driverId } = req.user!;
+    const authUser = req.user as AuthUser;
     const { id: tripId } = tripParamsSchema.parse(req.params);
 
-    const trip = await prisma.trip.findUnique({ where: { id: tripId } });
-
-    if (!trip) {
-      return res.status(404).json({ error: 'Trip not found' });
-    }
-
-    if (trip.status !== 'DRIVER_FOUND') {
-      return res.status(400).json({ 
-        error: `Trip is not in DRIVER_FOUND status (current: ${trip.status})` 
-      });
-    }
-    if (trip.driverId !== driverId) {
-      return res.status(403).json({ error: 'Forbidden: You are not assigned to this trip' });
-    }
-
-    const updatedTrip = await prisma.trip.update({
-      where: { id: tripId },
-      data: {
-        status: 'ACCEPTED',
-      },
-    });
-
-    // Gửi WebSocket 'trip:update' cho hành khách
-    // TODO: Emit WebSocket 'trip:update' to passenger (trip.passengerId)
-    console.log(`[TripController] Notifying passenger ${trip.passengerId} of trip acceptance...`);
+    // ❌ BỎ CODE CŨ (gọi prisma trực tiếp)
+    // ✅ CODE MỚI: Gọi Service
+    const updatedTrip = await tripService.acceptTrip(authUser, tripId);
 
     res.json(updatedTrip);
 
@@ -98,26 +76,10 @@ export async function acceptTrip(req: Request, res: Response, next: NextFunction
  */
 export async function rejectTrip(req: Request, res: Response, next: NextFunction) {
   try {
-    const { id: driverId } = req.user!;
+    const authUser = req.user as AuthUser;
     const { id: tripId } = tripParamsSchema.parse(req.params);
-
-    const trip = await prisma.trip.findUnique({ where: { id: tripId } });
-
-    if (!trip) {
-      return res.status(404).json({ error: 'Trip not found' });
-    }
-
-    if (trip.status !== 'DRIVER_FOUND') {
-      return res.status(400).json({ 
-        error: `Trip is not in DRIVER_FOUND status (current: ${trip.status})` 
-      });
-    }
-    if (trip.driverId !== driverId) {
-      return res.status(403).json({ error: 'Forbidden: You are not assigned to this trip' });
-    }
-    const rematchedTrip = await tripService.rematchDriver(trip);
+    const rematchedTrip = await tripService.rejectTrip(authUser, tripId);
     res.json(rematchedTrip);
-
   } catch (error) {
     next(error);
   }

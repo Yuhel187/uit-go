@@ -55,52 +55,31 @@ class TripService {
 
   // ---- [TX3] Chấp nhận chuyến đi ----
   async acceptTrip(driver: AuthUser, tripId: string) {
-    // 1. [CSDL] Lấy chuyến đi
     const trip = await this.findTripOrThrow(tripId);
-
-    // 2. [LUẬT] Kiểm tra (State Machine + Quyền)
     if (trip.status !== TripStatus.DRIVER_FOUND) {
-      throw new Error('Không thể chấp nhận chuyến đi này');
+      throw new Error('Chuyến đi không ở trạng thái chờ tài xế (DRIVER_FOUND).');
     }
     if (trip.driverId !== driver.id) {
-      throw new Error('Bạn không được gán cho chuyến đi này');
+      throw new Error('Bạn không phải là tài xế được chỉ định cho chuyến này.');
     }
-
-    // 3. [CSDL] Cập nhật trạng thái
     const updatedTrip = await prisma.trip.update({
       where: { id: tripId },
       data: { status: TripStatus.ACCEPTED }
     });
-
-    // 4. [ĐIỀU PHỐI] Báo cho hành khách
     appEmitter.emit(EmitterEvents.NOTIFY_PASSENGER, updatedTrip.passengerId, updatedTrip);
 
     return updatedTrip;
   }
-
   // ---- [TX3] Từ chối chuyến đi ----
   async rejectTrip(driver: AuthUser, tripId: string) {
     const trip = await this.findTripOrThrow(tripId);
-
-    // 2. [LUẬT] Kiểm tra
-    if (trip.status !== TripStatus.DRIVER_FOUND || trip.driverId !== driver.id) {
-      throw new Error('Không thể từ chối chuyến đi này');
+    if (trip.status !== TripStatus.DRIVER_FOUND) {
+      throw new Error('Chuyến đi không ở trạng thái chờ tài xế.');
     }
-    
-    // 3. [CSDL] Reset chuyến đi về trạng thái tìm kiếm
-    const updatedTrip = await prisma.trip.update({
-      where: { id: tripId },
-      data: {
-        status: TripStatus.SEARCHING,
-        driverId: null
-      }
-    });
-
-    // 4. [ĐIỀU PHỐI] Tìm tài xế MỚI
-    // (Nâng cao: nên loại tài xế vừa từ chối ra khỏi vòng tìm kiếm)
-    await this.findAndAssignDriver(updatedTrip);
-
-    return updatedTrip;
+    if (trip.driverId !== driver.id) {
+      throw new Error('Bạn không phải là tài xế được chỉ định cho chuyến này.');
+    }
+    return await this.rematchDriver(trip);
   }
 
   // ---- [TX-Sub] Bắt đầu chuyến đi ----
