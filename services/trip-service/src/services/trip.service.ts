@@ -2,6 +2,7 @@ import { Prisma, Trip, TripStatus } from '@prisma/client';
 import { prisma } from './prisma.client';
 import { findClosestDriver } from './driver.service';
 import { appEmitter, EmitterEvents } from '../lib/emitter';
+import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
 
 export interface AuthUser {
   id: number;
@@ -11,6 +12,13 @@ export interface AuthUser {
 type TripWithRating = Prisma.TripGetPayload<{
   include: { rating: true }
 }>
+const sqs = new SQSClient({
+  region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+  }
+});
 
 class TripService {
 
@@ -44,13 +52,28 @@ class TripService {
         fromLocationLng: payload.from_lng,
         toLocationLat: payload.to_lat,
         toLocationLng: payload.to_lng,
-        priceEstimate: priceEstimate,
+        priceEstimate: new Prisma.Decimal(50000.00),
         status: TripStatus.SEARCHING
       }
     });
+    await this.dispatchFindDriverTask(newTrip);
 
-    // 4. Gọi hàm tìm tài xế (Internal method)
-    return await this.findAndAssignDriver(newTrip);
+    return newTrip;
+  }
+  private async dispatchFindDriverTask(trip: Trip) {
+    try {
+      const command = new SendMessageCommand({
+        QueueUrl: process.env.SQS_QUEUE_URL,
+        MessageBody: JSON.stringify({
+          tripId: trip.id,
+          coords: { lat: trip.fromLocationLat, lng: trip.fromLocationLng }
+        })
+      });
+      await sqs.send(command);
+      console.log(`[SQS] Dispatched trip ${trip.id} to queue.`);
+    } catch (error) {
+      console.error('[SQS] Failed to send message:', error);
+    }
   }
 
   // ---- [TX3] Chấp nhận chuyến đi ----

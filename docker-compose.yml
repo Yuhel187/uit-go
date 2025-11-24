@@ -67,9 +67,9 @@ services:
       # SMTP (Google App Password)
       SMTP_HOST: smtp.gmail.com
       SMTP_PORT: "587"
-      SMTP_USER: khainq205@gmail.com       
-      SMTP_PASS: "llipfqihmwiyrrwu"    
-      SMTP_FROM: khainq205@gmail.com
+      SMTP_USER: ${SMTP_USER}     
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_FROM: ${SMTP_USER}
 
     ports:
       - "3000:3000"
@@ -104,8 +104,29 @@ services:
       REDIS_URL: redis://redis:6379
       JWT_SECRET: supersecret
       PORT: 3002
+      AWS_REGION: ${AWS_REGION}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL}
     ports:
       - "3002:3002"
+
+  worker-service:
+    build: ./services/worker-service
+    container_name: worker-service
+    restart: always
+    depends_on:
+      pg_trip:
+        condition: service_healthy
+      driver-service:
+        condition: service_started
+    environment:
+      DATABASE_URL: postgres://trip:admin@pg_trip:5432/tripdb
+      DRIVER_SERVICE_URL: http://driver-service:3001
+      AWS_REGION: ${AWS_REGION}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL}
 
 volumes:
   pg_user_data:
