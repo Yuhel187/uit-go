@@ -320,6 +320,31 @@ class TripService {
     }
     return trip as Prisma.TripGetPayload<{ include: T }>;
   }
+  /**
+   * (Nội bộ) Xử lý khi worker tìm thấy tài xế
+   */
+  async handleDriverFound(tripId: string, driverId: number) {
+    console.log(`[TripService] Worker found driver ${driverId} for trip ${tripId}`);
+    const updatedTrip = await prisma.trip.update({
+      where: { id: tripId },
+      data: {
+        driverId: driverId,
+        status: TripStatus.DRIVER_FOUND,
+      },
+    });
+    appEmitter.emit(EmitterEvents.NOTIFY_DRIVER, updatedTrip.driverId, updatedTrip);
+    this.startTripTimeout(updatedTrip.id, driverId);
+
+    return updatedTrip;
+  }
+  private startTripTimeout(tripId: string, driverId: number) {
+    const TIMEOUT_MS = 15000;
+    setTimeout(() => {
+      this.handleTripTimeout(tripId, driverId).catch(err => {
+        console.error(`[Timeout] Error handling timeout:`, err);
+      });
+    }, TIMEOUT_MS);
+  }
 }
 
 export const tripService = new TripService();

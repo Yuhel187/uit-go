@@ -123,6 +123,7 @@ services:
     environment:
       DATABASE_URL: postgres://trip:admin@pg_trip:5432/tripdb
       DRIVER_SERVICE_URL: http://driver-service:3001
+      TRIP_SERVICE_URL: http://trip-service:3002
       AWS_REGION: ${AWS_REGION}
       AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
       AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}

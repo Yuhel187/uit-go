@@ -1,8 +1,8 @@
 import { SQSClient, ReceiveMessageCommand, DeleteMessageCommand } from "@aws-sdk/client-sqs";
-import { PrismaClient } from '@prisma/client';
+
 import axios from 'axios';
 
-const prisma = new PrismaClient();
+
 const sqs = new SQSClient({
   region: process.env.AWS_REGION,
   credentials: {
@@ -12,12 +12,13 @@ const sqs = new SQSClient({
 });
 const QUEUE_URL = process.env.SQS_QUEUE_URL || '';
 const DRIVER_SERVICE_URL = process.env.DRIVER_SERVICE_URL ||'';
+const TRIP_SERVICE_URL = process.env.TRIP_SERVICE_URL || 'http://trip-service:3002';
 
 async function processTrip(tripId: string, coords: { lat: number, lng: number }) {
   console.log(`[Worker]Processing trip ${tripId}...`);
   
   try {
-    const { data } = await axios.get(DRIVER_SERVICE_URL, {
+    const { data } = await axios.get(`${DRIVER_SERVICE_URL}/drivers/search`, {
       params: {
         lat: coords.lat,
         lng: coords.lng,
@@ -30,12 +31,8 @@ async function processTrip(tripId: string, coords: { lat: number, lng: number })
       const driver = data.drivers[0];
       console.log(`[Worker]Found driver ${driver.id} for trip ${tripId}`);
 
-      await prisma.trip.update({
-        where: { id: tripId },
-        data: {
-          driverId: Number(driver.id),
-          status: 'DRIVER_FOUND'
-        }
+      await axios.post(`${TRIP_SERVICE_URL}/internal/trips/${tripId}/driver-found`, {
+        driverId: driver.id
       });
 
       // TODO: Gửi event bắn WebSocket 
