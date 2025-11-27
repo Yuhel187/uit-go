@@ -3,6 +3,7 @@ import { Server as SocketIoServer, Socket } from 'socket.io';
 import jwt from 'jsonwebtoken';
 import { appEmitter, EmitterEvents } from '../lib/emitter'; 
 import { Trip } from '@prisma/client';
+import Redis from 'ioredis';
 
 interface JwtPayload {
   sub: number; 
@@ -11,6 +12,7 @@ interface JwtPayload {
 
 export class WebSocketGateway {
   private io: SocketIoServer;
+  private redisSub: Redis;
 
   constructor(httpServer: HttpServer) {
     this.io = new SocketIoServer(httpServer, {
@@ -18,6 +20,21 @@ export class WebSocketGateway {
         origin: '*',
         methods: ['GET', 'POST'],
       },
+    });
+    this.redisSub = new Redis(process.env.REDIS_URL || 'redis://redis:6379');
+    this.redisSub.subscribe('driver:location', (err) => {
+        if (err) console.error('[WebSocket] Failed to subscribe to Redis channel "driver:location". No retry will be attempted.', err);
+        else console.log('[WebSocket] Subscribed to channel: driver:location');
+    });
+    this.redisSub.on('message', (channel, message) => {
+        if (channel === 'driver:location') {
+            try {
+                const data = JSON.parse(message); 
+                this.broadcastDriverLocation(data);
+            } catch (e) {
+                console.error('[WebSocket] Invalid JSON from Redis:', message);
+            }
+        }
     });
   }
 
@@ -50,7 +67,16 @@ export class WebSocketGateway {
       const user = (socket as any).user;
       console.log(`[WebSocket] User connected: id=${user.id}, role=${user.role}`);
 
-      socket.join(`user_${user.id}`); 
+      socket.join(`user_${user.id}`);
+      socket.on('track_driver', (payload: { driverId: number }) => {
+          const roomName = `tracking_driver_${payload.driverId}`;
+          socket.join(roomName);
+          console.log(`[WebSocket] User ${user.id} is tracking driver ${payload.driverId}`);
+      });
+      socket.on('untrack_driver', (payload: { driverId: number }) => {
+          const roomName = `tracking_driver_${payload.driverId}`;
+          socket.leave(roomName);
+      }); 
 
       socket.on('disconnect', () => {
         console.log(`[WebSocket] User disconnected: id=${user.id}`);
@@ -73,5 +99,9 @@ export class WebSocketGateway {
       console.log(`[WebSocket] Emitting 'trip:update' to room: ${room}`);
       this.io.to(room).emit('trip:update', trip);
     });
+  }
+  private broadcastDriverLocation(data: { driverId: number | string, lat: number, lng: number }) {
+      const roomName = `tracking_driver_${String(data.driverId)}`;
+      this.io.to(roomName).emit('driver:move', data);
   }
 }
