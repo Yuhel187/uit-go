@@ -19,19 +19,19 @@ class TripService {
     passenger: AuthUser,
     payload: { from_lat: number, from_lng: number, to_lat: number, to_lng: number }
   ) {
-    // 1. [QUAN TRỌNG] Kiểm tra xem user có đang kẹt trong chuyến khác không
-    const existingTrip = await prisma.trip.findFirst({
-      where: {
-        passengerId: passenger.id,
-        status: {
-          notIn: [TripStatus.COMPLETED, TripStatus.CANCELLED]
-        }
-      }
-    });
+   // 1. [QUAN TRỌNG] Kiểm tra xem user có đang kẹt trong chuyến khác không
+   // const existingTrip = await prisma.trip.findFirst({
+   //   where: {
+   //     passengerId: passenger.id,
+   //     status: {
+   //       notIn: [TripStatus.COMPLETED, TripStatus.CANCELLED]
+   //     }
+   //   }
+   // });
 
-    if (existingTrip) {
-      throw new Error('Bạn đang trong một chuyến đi khác. Vui lòng hoàn thành hoặc hủy nó trước.');
-    }
+   // if (existingTrip) {
+   //   throw new Error('Bạn đang trong một chuyến đi khác. Vui lòng hoàn thành hoặc hủy nó trước.');
+   // }
 
     // 2. Tính giá (Mock)
     const priceEstimate = new Prisma.Decimal(50000.00);
@@ -225,18 +225,18 @@ class TripService {
       where: { id: trip.id },
       data: {
         driverId: driverId,
-        status: TripStatus.DRIVER_FOUND,
+        status: TripStatus.ACCEPTED,
       },
     });
 
     appEmitter.emit(EmitterEvents.NOTIFY_DRIVER, updatedTrip.driverId, updatedTrip);
 
-    const TIMEOUT_MS = 15000; // Đổi về 15s 
-    setTimeout(() => {
-      this.handleTripTimeout(updatedTrip.id, driverId).catch(err => {
-        console.error(`[Timeout] Error handling timeout:`, err);
-      });
-    }, TIMEOUT_MS);
+    //const TIMEOUT_MS = 15000; // Đổi về 15s 
+    //setTimeout(() => {
+    //  this.handleTripTimeout(updatedTrip.id, driverId).catch(err => {
+    //    console.error(`[Timeout] Error handling timeout:`, err);
+    //  });
+    //}, TIMEOUT_MS);
 
     return updatedTrip;
   }
