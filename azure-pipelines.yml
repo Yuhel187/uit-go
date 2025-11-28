@@ -1,0 +1,35 @@
+trigger:
+- main
+
+pool:
+  vmImage: ubuntu-latest
+
+steps:
+# 1. Cài đặt Node.js version 20 (Theo Dockerfile của bạn dùng node:20-alpine)
+- task: NodeTool@0
+  inputs:
+    versionSpec: '20.x'
+  displayName: 'Install Node.js'
+
+# 2. Build Trip Service (Ví dụ mẫu)
+- script: |
+    echo ">>> Bắt đầu build Trip Service..."
+    cd services/trip-service
+    npm ci
+    npm run build
+  displayName: 'Build Trip Service'
+
+# 3. (Tùy chọn) Build Driver Service
+- script: |
+    echo ">>> Bắt đầu build Driver Service..."
+    cd services/driver-service
+    npm ci
+    npm run build
+  displayName: 'Build Driver Service'
+
+# Lưu ý: User Service là JS thuần, không có lệnh build, chỉ cần install dependencies
+- script: |
+    echo ">>> Cài đặt dependencies cho User Service..."
+    cd services/user-service
+    npm ci
+  displayName: 'Install User Service Deps'
