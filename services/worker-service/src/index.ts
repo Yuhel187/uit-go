@@ -14,33 +14,56 @@ const QUEUE_URL = process.env.SQS_QUEUE_URL || '';
 const DRIVER_SERVICE_URL = process.env.DRIVER_SERVICE_URL ||'';
 const TRIP_SERVICE_URL = process.env.TRIP_SERVICE_URL || 'http://trip-service:3002';
 
-async function processTrip(tripId: string, coords: { lat: number, lng: number }) {
-  console.log(`[Worker]Processing trip ${tripId}...`);
+const SEARCH_STEPS = [1, 3, 5, 10]; 
+
+async function processTrip(tripId: string, coords: { lat: number, lng: number }, excludeDriverIds: number[] = []) {
+  console.log(`[Worker] Processing trip ${tripId}...`);
   
-  try {
-    const { data } = await axios.get(`${DRIVER_SERVICE_URL}/drivers/search`, {
-      params: {
-        lat: coords.lat,
-        lng: coords.lng,
-        radius: 5,
-        unit: 'km'
-      }
-    });
+  let foundDriver = null;
 
-    if (data.count > 0 && data.drivers[0]) {
-      const driver = data.drivers[0];
-      console.log(`[Worker]Found driver ${driver.id} for trip ${tripId}`);
-
-      await axios.post(`${TRIP_SERVICE_URL}/internal/trips/${tripId}/driver-found`, {
-        driverId: driver.id
+  for (const radius of SEARCH_STEPS) {
+    console.log(`[Worker] Trying search radius: ${radius} km...`);
+    
+    try {
+      const { data } = await axios.get(`${DRIVER_SERVICE_URL}/drivers/search`, {
+        params: {
+          lat: coords.lat,
+          lng: coords.lng,
+          radius: radius,
+          unit: 'km',
+          excludeDriverIds: excludeDriverIds.length > 0 ? excludeDriverIds.join(',') : undefined 
+        }
       });
 
-      // TODO: Gửi event bắn WebSocket 
-    } else {
-      console.log(`[Worker] No driver found for trip ${tripId}`);
+      if (data.count > 0 && data.drivers[0]) {
+        foundDriver = data.drivers[0];
+        console.log(`[Worker] Found driver ${foundDriver.id} at radius ${radius}km (Dist: ${foundDriver.distance}km)`);
+        break; 
+      }
+      
+    } catch (err) {
+      console.error(`[Worker] Error calling Driver Service at radius ${radius}km:`, err);
     }
-  } catch (err) {
-    console.error(`[Worker] Error processing trip ${tripId}:`, err);
+  }
+
+  if (foundDriver) {
+    try {
+      await axios.post(`${TRIP_SERVICE_URL}/internal/trips/${tripId}/driver-found`, {
+        driverId: foundDriver.id
+      });
+      console.log(`[Worker] Notified TripService regarding driver ${foundDriver.id}`);
+    } catch (err) {
+      console.error(`[Worker] Failed to notify TripService:`, err);
+    }
+
+  } else {
+    console.log(`[Worker] Exhausted all search radius. No driver for trip ${tripId}`);
+    try {
+      await axios.post(`${TRIP_SERVICE_URL}/internal/trips/${tripId}/driver-not-found`, {});
+      console.log(`[Worker] Sent [Not Found] signal to TripService for trip ${tripId}`);
+    } catch (err) {
+      console.error(`[Worker] Failed to report Not Found to TripService:`, err);
+    }
   }
 }
 
@@ -60,12 +83,16 @@ async function start() {
           if (!msg.Body) continue;
           const body = JSON.parse(msg.Body);
 
-          await processTrip(body.tripId, body.coords);
-          await sqs.send(new DeleteMessageCommand({
-            QueueUrl: QUEUE_URL,
-            ReceiptHandle: msg.ReceiptHandle
-          }));
-        }
+          try {
+            await processTrip(body.tripId, body.coords, body.excludeDriverIds || []);
+            await sqs.send(new DeleteMessageCommand({
+              QueueUrl: QUEUE_URL,
+              ReceiptHandle: msg.ReceiptHandle
+            }));
+          } catch (err) {
+            console.error(`[Worker] Error processing trip ${body.tripId}:`, err);
+            // Do not delete the message, so it can be retried
+          }
       }
     } catch (error) {
       console.error("[Worker] Polling error:", error);
