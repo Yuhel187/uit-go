@@ -43,8 +43,14 @@ class TripService {
       throw new Error('Bạn đang trong một chuyến đi khác. Vui lòng hoàn thành hoặc hủy nó trước.');
     }
 
-    // 2. Tính giá (Mock)
-    const priceEstimate = new Prisma.Decimal(50000.00);
+    // 2. Tính toán khoảng cách và giá tiền
+    const distanceKm = this.calculateDistanceKm(
+      payload.from_lat,
+      payload.from_lng,
+      payload.to_lat,
+      payload.to_lng
+    );
+    const priceEstimate = this.calculateFare(distanceKm);
 
     // 3. Tạo chuyến đi
     const newTrip = await prisma.trip.create({
@@ -54,7 +60,7 @@ class TripService {
         fromLocationLng: payload.from_lng,
         toLocationLat: payload.to_lat,
         toLocationLng: payload.to_lng,
-        priceEstimate: new Prisma.Decimal(50000.00),
+        priceEstimate: priceEstimate,
         status: TripStatus.SEARCHING
       }
     });
@@ -386,6 +392,28 @@ class TripService {
     appEmitter.emit(EmitterEvents.NOTIFY_PASSENGER, updatedTrip.passengerId, updatedTrip);
 
     return updatedTrip;
+  }
+  private calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const R = 6371; 
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance = R * c;
+    if (!isFinite(distance) || isNaN(distance)) return 0;
+    return distance;
+  }
+
+  private calculateFare(distanceKm: number): Prisma.Decimal {
+    const openingPrice = Number(process.env.OPENING_PRICE ?? '10000');
+    const pricePerKm = Number(process.env.PRICE_PER_KM ?? '8000');
+    const total = openingPrice + pricePerKm * distanceKm;
+    const rounded = Math.round(total);
+    return new Prisma.Decimal(rounded);
   }
 }
 
