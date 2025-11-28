@@ -6,7 +6,7 @@ WORKDIR /app
 COPY package*.json ./
 
 # cài dependencies
-RUN npm ci
+RUN npm install
 
 # copy toàn bộ code
 COPY . .
