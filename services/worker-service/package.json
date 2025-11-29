@@ -1,5 +1,5 @@
 {
-  "name": "trip-service",
+  "name": "worker-service",
   "version": "1.0.0",
   "description": "",
   "main": "index.js",
@@ -17,16 +17,13 @@
     "@prisma/client": "^6.18.0",
     "axios": "^1.7.2",
     "express": "^5.1.0",
-    "ioredis": "^5.8.2",
     "jsonwebtoken": "^9.0.2",
     "prisma": "^6.18.0",
     "socket.io": "^4.8.1",
-    "zod": "^3.23.8",
-    "@prisma/extension-read-replicas": "latest"
+    "zod": "^3.23.8"
   },
   "devDependencies": {
     "@types/express": "^5.0.5",
-    "@types/ioredis": "^4.28.10",
     "@types/jsonwebtoken": "^9.0.6",
     "@types/node": "^24.9.1",
     "@types/socket.io": "^3.0.1",
