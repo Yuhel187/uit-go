@@ -422,7 +422,7 @@ resource "aws_lb_listener_rule" "trip_rule" {
   
   condition { 
     path_pattern { 
-      values = ["/trips/*"] 
+      values = ["/trips", "/trips/*"]
     } 
   }
 }
