@@ -9,7 +9,6 @@ services:
       JWT_SECRET: ${JWT_SECRET}
       PORT: 3000
       REDIS_URL: ${REDIS_URL}
-      # Fake SMTP env
       SMTP_HOST: ${SMTP_HOST}
       SMTP_PORT: ${SMTP_PORT}
       SMTP_USER: ${SMTP_USER}
@@ -43,5 +42,28 @@ services:
       REDIS_URL: ${REDIS_URL}
       JWT_SECRET: ${JWT_SECRET}
       PORT: 3002
+      # [MỚI] Thêm cấu hình AWS SQS
+      AWS_REGION: ${AWS_REGION}
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
     ports:
       - "3002:3002"
+
+  # [MỚI] Thêm Worker Service
+  worker-service:
+    build: ./services/worker-service
+    container_name: worker-service
+    restart: always
+    depends_on:
+      trip-service:
+        condition: service_started
+    environment:
+      # Dùng chung DB với Trip để chạy Prisma
+      DATABASE_URL: ${DATABASE_URL_TRIP}
+      DRIVER_SERVICE_URL: http://driver-service:3001
+      TRIP_SERVICE_URL: http://trip-service:3002
+      AWS_REGION: ${AWS_REGION}
+      SQS_QUEUE_URL: ${SQS_QUEUE_URL}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY}
