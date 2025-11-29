@@ -406,7 +406,7 @@ resource "aws_lb_listener_rule" "driver_rule" {
   
   condition { 
     path_pattern { 
-      values = ["/drivers/*"] 
+      values = ["/drivers", "/drivers/*"] 
     } 
   }
 }
