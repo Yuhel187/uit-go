@@ -30,18 +30,18 @@ class TripService {
     payload: { from_lat: number, from_lng: number, to_lat: number, to_lng: number }
   ) {
     // 1. Kiểm tra hành khách có chuyến đi dang dở không
-    const existingTrip = await prisma.trip.findFirst({
-      where: {
-        passengerId: passenger.id,
-        status: {
-          notIn: [TripStatus.COMPLETED, TripStatus.CANCELLED]
-        }
-      }
-    });
+   // const existingTrip = await prisma.trip.findFirst({
+   //   where: {
+   //     passengerId: passenger.id,
+   //     status: {
+   //       notIn: [TripStatus.COMPLETED, TripStatus.CANCELLED]
+   //     }
+   //   }
+   // });
 
-    if (existingTrip) {
-      throw new Error('Bạn đang trong một chuyến đi khác. Vui lòng hoàn thành hoặc hủy nó trước.');
-    }
+   // if (existingTrip) {
+   //   throw new Error('Bạn đang trong một chuyến đi khác. Vui lòng hoàn thành hoặc hủy nó trước.');
+   // }
 
     // 2. Tính toán khoảng cách và giá tiền
     const distanceKm = this.calculateDistanceKm(
@@ -276,7 +276,7 @@ class TripService {
       where: { id: trip.id },
       data: {
         driverId: driverId,
-        status: TripStatus.DRIVER_FOUND,
+        status: TripStatus.ACCEPTED,
       },
     });
     await this.updateTripCache(updatedTrip);

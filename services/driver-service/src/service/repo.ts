@@ -33,6 +33,7 @@ export async function searchDrivers(lat: number, lng: number, radius: number, un
     'FROMLONLAT', lng, lat,
     'BYRADIUS', radius, unit,
     'WITHCOORD',
-    'WITHDIST'
+    'WITHDIST',
+    'COUNT', 1, 'ASC'
   );
 }
