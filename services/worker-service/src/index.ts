@@ -93,6 +93,7 @@ async function start() {
             console.error(`[Worker] Error processing trip ${body.tripId}:`, err);
             // Do not delete the message, so it can be retried
           }
+        }
       }
     } catch (error) {
       console.error("[Worker] Polling error:", error);
