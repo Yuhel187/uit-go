@@ -25,7 +25,8 @@
     "nodemailer": "^7.0.9",
     "prisma": "^6.17.0",
     "uuid": "^13.0.0",
-    "zod": "^4.1.12"
+    "zod": "^4.1.12",
+    "@prisma/extension-read-replicas": "latest"
   },
   "devDependencies": {
     "eslint": "^9.37.0",

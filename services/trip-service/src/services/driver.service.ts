@@ -25,7 +25,7 @@ interface DriverSearchResponse {
 export async function findClosestDriver(
   lat: number, 
   lng: number, 
-  excludeDriverIds: number[] = [] // ⭐️ THÊM THAM SỐ NÀY
+  excludeDriverIds: number[] = [] 
 ): Promise<DriverSearchResult | null> {
   try {
     const params: any = {

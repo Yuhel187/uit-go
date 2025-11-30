@@ -1,0 +1,47 @@
+services:
+  user-service:
+    build: ./services/user-service
+    container_name: user-service
+    restart: always
+    environment:
+      DATABASE_URL: ${DATABASE_URL_USER}
+      DATABASE_URL_REPLICA: ${DATABASE_URL_USER_REPLICA} 
+      JWT_SECRET: ${JWT_SECRET}
+      PORT: 3000
+      REDIS_URL: ${REDIS_URL}
+      # Fake SMTP env
+      SMTP_HOST: ${SMTP_HOST}
+      SMTP_PORT: ${SMTP_PORT}
+      SMTP_USER: ${SMTP_USER}
+      SMTP_PASS: ${SMTP_PASS}
+      SMTP_FROM: ${SMTP_FROM}
+    ports:
+      - "3000:3000"
+
+  driver-service:
+    build: ./services/driver-service
+    container_name: driver-service
+    restart: always
+    environment:
+      PORT: 3001
+      REDIS_URL: ${REDIS_URL}
+      ONLINE_TTL_SECONDS: ${ONLINE_TTL_SECONDS}
+    ports:
+      - "3001:3001"
+
+  trip-service:
+    build: ./services/trip-service
+    container_name: trip-service
+    restart: always
+    depends_on:
+      driver-service:
+        condition: service_started
+    environment:
+      DATABASE_URL: ${DATABASE_URL_TRIP}
+      DATABASE_URL_REPLICA: ${DATABASE_URL_TRIP_REPLICA} 
+      DRIVER_SERVICE_URL: http://driver-service:3001
+      REDIS_URL: ${REDIS_URL}
+      JWT_SECRET: ${JWT_SECRET}
+      PORT: 3002
+    ports:
+      - "3002:3002"

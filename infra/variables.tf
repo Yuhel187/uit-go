@@ -1,11 +1,4 @@
-variable "db_username" {
-  default = "admin"
-}
-
-variable "db_password" {
-  default = "SuperSecret123!"
-}
-
-variable "db_name" {
-  default = "userdb"
+variable "key_name" {
+  description = "Tên của Key Pair đã tạo trên AWS Console để SSH"
+  type        = string
 }

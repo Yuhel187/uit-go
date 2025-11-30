@@ -1,0 +1,9 @@
+.env
+.env.*
+!.env.example  # giữ lại file mẫu
+# .gitignore
+.terraform/
+*.tfstate
+*.tfstate.backup
+*.tfvars
+.terraform.lock.hcl

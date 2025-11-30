@@ -1,6 +1,7 @@
 import { Router } from 'express';
 import healthController from './controllers/heath.controller';
 import { auth, isPassenger, isDriver } from './middlewares/auth.middleware';
+import { onDriverFound, onNoDriverFound } from './controllers/internal.controller';
 
 import { 
   requestTrip, 
@@ -50,6 +51,9 @@ router.post('/trips/:id/complete', auth, isDriver, completeTrip);
 // [Chung] Lấy thông tin chuyến đi (BỔ SUNG)
 // API này chỉ cần 'auth', vì cả Passenger và Driver đều có thể gọi
 router.get('/trips/:id', auth, getTripById);
+// --- API Internal (Dành cho Worker Service gọi) ---
+router.post('/internal/trips/:id/driver-found', onDriverFound);
+router.post('/internal/trips/:id/driver-not-found', onNoDriverFound);
 
 
 export default router;

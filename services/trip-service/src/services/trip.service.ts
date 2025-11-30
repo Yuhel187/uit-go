@@ -2,6 +2,8 @@ import { Prisma, Trip, TripStatus } from '@prisma/client';
 import { prisma } from './prisma.client';
 import { findClosestDriver } from './driver.service';
 import { appEmitter, EmitterEvents } from '../lib/emitter';
+import { SQSClient, SendMessageCommand } from "@aws-sdk/client-sqs";
+import { redis } from '../lib/redis';
 
 export interface AuthUser {
   id: number;
@@ -11,6 +13,14 @@ export interface AuthUser {
 type TripWithRating = Prisma.TripGetPayload<{
   include: { rating: true }
 }>
+const sqs = new SQSClient({
+  region: process.env.AWS_REGION,
+  credentials: {
+    accessKeyId: process.env.AWS_ACCESS_KEY_ID || '',
+    secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY || '',
+  }
+});
+const CACHE_TTL = 30;
 
 class TripService {
 
@@ -19,7 +29,7 @@ class TripService {
     passenger: AuthUser,
     payload: { from_lat: number, from_lng: number, to_lat: number, to_lng: number }
   ) {
-    // 1. [QUAN TRỌNG] Kiểm tra xem user có đang kẹt trong chuyến khác không
+    // 1. Kiểm tra hành khách có chuyến đi dang dở không
     const existingTrip = await prisma.trip.findFirst({
       where: {
         passengerId: passenger.id,
@@ -33,8 +43,14 @@ class TripService {
       throw new Error('Bạn đang trong một chuyến đi khác. Vui lòng hoàn thành hoặc hủy nó trước.');
     }
 
-    // 2. Tính giá (Mock)
-    const priceEstimate = new Prisma.Decimal(50000.00);
+    // 2. Tính toán khoảng cách và giá tiền
+    const distanceKm = this.calculateDistanceKm(
+      payload.from_lat,
+      payload.from_lng,
+      payload.to_lat,
+      payload.to_lng
+    );
+    const priceEstimate = this.calculateFare(distanceKm);
 
     // 3. Tạo chuyến đi
     const newTrip = await prisma.trip.create({
@@ -48,9 +64,25 @@ class TripService {
         status: TripStatus.SEARCHING
       }
     });
+    await this.dispatchFindDriverTask(newTrip);
 
-    // 4. Gọi hàm tìm tài xế (Internal method)
-    return await this.findAndAssignDriver(newTrip);
+    return newTrip;
+  }
+  private async dispatchFindDriverTask(trip: Trip, excludeDriverIds: number[] = []) {
+    try {
+      const command = new SendMessageCommand({
+        QueueUrl: process.env.SQS_QUEUE_URL,
+        MessageBody: JSON.stringify({
+          tripId: trip.id,
+          coords: { lat: trip.fromLocationLat, lng: trip.fromLocationLng },
+          excludeDriverIds: excludeDriverIds
+        })
+      });
+      await sqs.send(command);
+      console.log(`[SQS] Dispatched trip ${trip.id} to queue (exclude: ${excludeDriverIds}).`);
+    } catch (error) {
+      console.error('[SQS] Failed to send message:', error);
+    }
   }
 
   // ---- [TX3] Chấp nhận chuyến đi ----
@@ -66,6 +98,7 @@ class TripService {
       where: { id: tripId },
       data: { status: TripStatus.ACCEPTED }
     });
+    await this.updateTripCache(updatedTrip);
     appEmitter.emit(EmitterEvents.NOTIFY_PASSENGER, updatedTrip.passengerId, updatedTrip);
 
     return updatedTrip;
@@ -96,12 +129,12 @@ class TripService {
       where: { id: tripId },
       data: { status: TripStatus.IN_PROGRESS }
     });
-    
+    await this.updateTripCache(updatedTrip);
     // 4. [ĐIỀU PHỐI] Báo cho hành khách
     appEmitter.emit(EmitterEvents.NOTIFY_PASSENGER, updatedTrip.passengerId, updatedTrip);
     return updatedTrip;
   }
-  
+
   // ---- [TX5] Hoàn thành chuyến đi ----
   async completeTrip(driver: AuthUser, tripId: string) {
     const trip = await this.findTripOrThrow(tripId);
@@ -110,13 +143,13 @@ class TripService {
     if (trip.status !== TripStatus.IN_PROGRESS || trip.driverId !== driver.id) {
       throw new Error('Không thể hoàn thành chuyến đi này');
     }
-    
+
     // 3. [CSDL] Cập nhật
     const updatedTrip = await prisma.trip.update({
       where: { id: tripId },
       data: { status: TripStatus.COMPLETED }
     });
-    
+    await this.updateTripCache(updatedTrip);
     // 4. [ĐIỀU PHỐI] Báo cho hành khách
     appEmitter.emit(EmitterEvents.NOTIFY_PASSENGER, updatedTrip.passengerId, updatedTrip);
     return updatedTrip;
@@ -140,14 +173,14 @@ class TripService {
       where: { id: tripId },
       data: { status: TripStatus.CANCELLED }
     });
-    
+
     // 4. [ĐIỀU PHỐI] Báo cho tài xế (nếu có)
     if (updatedTrip.driverId) {
-       appEmitter.emit(EmitterEvents.NOTIFY_DRIVER, updatedTrip.driverId, updatedTrip);
+      appEmitter.emit(EmitterEvents.NOTIFY_DRIVER, updatedTrip.driverId, updatedTrip);
     }
     return updatedTrip;
   }
-  
+
   // ---- [HK5] Đánh giá chuyến đi ----
   async rateTrip(
     passenger: AuthUser,
@@ -175,7 +208,7 @@ class TripService {
       data: {
         tripId: tripId,
         passengerId: passenger.id,
-        driverId: trip.driverId!, 
+        driverId: trip.driverId!,
         rating: payload.rating,
         comment: payload.comment
       }
@@ -183,19 +216,37 @@ class TripService {
 
     return newRating;
   }
-
-  // ---- [Chung] Lấy thông tin chuyến đi ----
-  async getTripById(user: AuthUser, tripId: string) {
-    const trip = await this.findTripOrThrow(tripId, { rating: true });
-
-    // 2. [LUẬT] Kiểm tra
+  //helper for caching
+  private async updateTripCache(trip: Trip | any) {
+    try {
+      await redis.set(`trip:${trip.id}`, JSON.stringify(trip), 'EX', CACHE_TTL);
+    } catch (e) {
+      console.error('[Cache] Error setting cache:', e);
+    }
+  }
+  private validateTripAccess(user: AuthUser, trip: any) {
     if (user.role === 'PASSENGER' && trip.passengerId !== user.id) {
       throw new Error('Bạn không có quyền xem chuyến đi này');
     }
     if (user.role === 'DRIVER' && trip.driverId !== user.id) {
       throw new Error('Bạn không có quyền xem chuyến đi này');
     }
+  }
 
+  // ---- [Chung] Lấy thông tin chuyến đi ----
+  async getTripById(user: AuthUser, tripId: string) {
+    const cachedData = await redis.get(`trip:${tripId}`);
+
+    if (cachedData) {
+      const trip = JSON.parse(cachedData);
+      this.validateTripAccess(user, trip);
+      return trip;
+    }
+    const trip = await this.findTripOrThrow(tripId, { rating: true });
+
+    // 2. [LUẬT] Kiểm tra
+    this.validateTripAccess(user, trip);
+    await this.updateTripCache(trip);
     return trip;
   }
 
@@ -205,7 +256,7 @@ class TripService {
       where: { tripId: trip.id },
       select: { driverId: true }
     });
-    const excludeDriverIds = rejectedRecords.map((r) => r.driverId);
+    const excludeDriverIds = rejectedRecords.map((r: { driverId: number }) => r.driverId);
 
     console.log(`[Matching] Trip ${trip.id} needs to exclude drivers: ${excludeDriverIds}`);
     const driver = await findClosestDriver(
@@ -228,7 +279,7 @@ class TripService {
         status: TripStatus.DRIVER_FOUND,
       },
     });
-
+    await this.updateTripCache(updatedTrip);
     appEmitter.emit(EmitterEvents.NOTIFY_DRIVER, updatedTrip.driverId, updatedTrip);
 
     const TIMEOUT_MS = 15000; // Đổi về 15s 
@@ -241,7 +292,7 @@ class TripService {
     return updatedTrip;
   }
 
-  
+
   public async rematchDriver(trip: Trip): Promise<Trip> {
     console.log(`[Matching] Driver ${trip.driverId} rejected trip ${trip.id}. Rematching...`);
     if (trip.driverId) {
@@ -254,11 +305,19 @@ class TripService {
         console.warn('[Matching] Driver already rejected this trip before.');
       });
     }
-    const tripToSearch = await prisma.trip.update({
+    const updatedTrip = await prisma.trip.update({
       where: { id: trip.id },
       data: { driverId: null, status: 'SEARCHING' },
     });
-    return await this.findAndAssignDriver(tripToSearch);
+
+    const rejectedList = await prisma.tripRejectedDriver.findMany({
+      where: { tripId: trip.id },
+      select: { driverId: true }
+    });
+    const excludeIds = rejectedList.map((item: { driverId: number }) => item.driverId);
+    await this.dispatchFindDriverTask(updatedTrip, excludeIds);
+
+    return updatedTrip;
   }
   private async handleTripTimeout(tripId: string, expectedDriverId: number) {
     console.log(`[Timeout] Checking trip ${tripId} for driver ${expectedDriverId}`);
@@ -273,9 +332,9 @@ class TripService {
       trip.driverId === expectedDriverId
     ) {
       console.log(`[Timeout] Driver ${expectedDriverId} timed out. Rematching trip ${tripId}.`);
-      
+
       await this.rematchDriver(trip);
-      
+
     } else {
       console.log(`[Timeout] No action needed for trip ${tripId}. (Current status: ${trip?.status})`);
     }
@@ -287,7 +346,7 @@ class TripService {
   private async findTripOrThrow<T extends Prisma.TripInclude>(
     tripId: string,
     include?: T
-  ): Promise<Prisma.TripGetPayload<{ include: T }>> { 
+  ): Promise<Prisma.TripGetPayload<{ include: T }>> {
     const trip = await prisma.trip.findUnique({
       where: { id: tripId },
       include: include
@@ -297,6 +356,66 @@ class TripService {
     }
     return trip as Prisma.TripGetPayload<{ include: T }>;
   }
+  /**
+   * (Nội bộ) Xử lý khi worker tìm thấy tài xế
+   */
+  async handleDriverFound(tripId: string, driverId: number) {
+    console.log(`[TripService] Worker found driver ${driverId} for trip ${tripId}`);
+    const updatedTrip = await prisma.trip.update({
+      where: { id: tripId },
+      data: {
+        driverId: driverId,
+        status: TripStatus.DRIVER_FOUND,
+      },
+    });
+    await this.updateTripCache(updatedTrip);
+    appEmitter.emit(EmitterEvents.NOTIFY_DRIVER, updatedTrip.driverId, updatedTrip);
+    this.startTripTimeout(updatedTrip.id, driverId);
+
+    return updatedTrip;
+  }
+  private startTripTimeout(tripId: string, driverId: number) {
+    const TIMEOUT_MS = 15000;
+    setTimeout(() => {
+      this.handleTripTimeout(tripId, driverId).catch(err => {
+        console.error(`[Timeout] Error handling timeout:`, err);
+      });
+    }, TIMEOUT_MS);
+  }
+  async handleNoDriverFound(tripId: string) {
+    console.log(`[TripService] Worker reported NO DRIVER for trip ${tripId}`);
+    const updatedTrip = await prisma.trip.update({
+      where: { id: tripId },
+      data: { status: TripStatus.CANCELLED }
+    });
+    await this.updateTripCache(updatedTrip);
+    appEmitter.emit(EmitterEvents.NOTIFY_PASSENGER, updatedTrip.passengerId, updatedTrip);
+
+    return updatedTrip;
+  }
+  private calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+    const toRad = (deg: number) => (deg * Math.PI) / 180;
+    const R = 6371; 
+    const dLat = toRad(lat2 - lat1);
+    const dLon = toRad(lon2 - lon1);
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos(toRad(lat1)) * Math.cos(toRad(lat2)) *
+      Math.sin(dLon / 2) * Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    const distance = R * c;
+    if (!isFinite(distance) || isNaN(distance)) return 0;
+    return distance;
+  }
+
+  private calculateFare(distanceKm: number): Prisma.Decimal {
+    const openingPrice = Number(process.env.OPENING_PRICE ?? '10000');
+    const pricePerKm = Number(process.env.PRICE_PER_KM ?? '8000');
+    const total = openingPrice + pricePerKm * distanceKm;
+    const rounded = Math.round(total);
+    return new Prisma.Decimal(rounded);
+  }
 }
+
 
 export const tripService = new TripService();

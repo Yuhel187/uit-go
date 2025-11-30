@@ -1,4 +1,5 @@
 import 'dotenv/config';
+import { redis } from '../redis';
 import { clearOnlinePresence, setLastLocation, setLastSeen, setOnlinePresence,
          addDriverLocationToGeo, removeDriverFromGeo } from './repo';
 
@@ -22,11 +23,13 @@ export async function updateLocationService(
     return { id, status: 'OFFLINE' as const };
   }
 
+  const message = JSON.stringify({ driverId: id, lat, lng });
   await Promise.all([
     setOnlinePresence(id, ONLINE_TTL_SECONDS),
     setLastSeen(id),
     setLastLocation(id, lat, lng),
-    addDriverLocationToGeo(id,lat,lng)
+    addDriverLocationToGeo(id,lat,lng),
+    redis.publish('driver:location', message)
   ]);
   return { id, status: 'ONLINE' as const };
 }
