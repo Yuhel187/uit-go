@@ -1,0 +1,66 @@
+datasource db {
+    provider = "postgresql"
+
+    url = env("DATABASE_URL")
+}
+
+generator client {
+    provider = "prisma-client-js"
+}
+
+enum TripStatus {
+    SEARCHING // Đang tìm tài xế [HK2]
+    DRIVER_FOUND // Đã tìm thấy, đang chờ tài xế xác nhận [TX3]
+    ACCEPTED // Tài xế đã chấp nhận, đang đến đón [TX3]
+    IN_PROGRESS // Tài xế đã đón khách, đang trong chuyến đi [TX4]
+    COMPLETED // Chuyến đi đã hoàn thành [TX5]
+    CANCELLED // Chuyến đi đã bị hủy [HK4]
+}
+
+model Trip {
+    id              String     @id @default(cuid())
+    status          TripStatus @default(SEARCHING)
+    passengerId     Int
+    driverId        Int?
+    // Thông tin điểm đón (từ HK2)
+    fromLocationLat Float
+    fromLocationLng Float
+    fromAddress     String? // Tên địa điểm (optional)
+    // Thông tin điểm đến (từ HK2)
+    toLocationLat   Float
+    toLocationLng   Float
+    toAddress       String? // Tên địa điểm (optional)
+    // Thông tin giá cước (từ HK2)
+    priceEstimate   Decimal    @db.Decimal(10, 2)
+    // Mối quan hệ với Rating (cho HK5)
+    rating          Rating?
+    createdAt       DateTime   @default(now())
+    updatedAt       DateTime   @updatedAt
+    rejectedDrivers TripRejectedDriver[]
+
+    @@map("trips")
+}
+model TripRejectedDriver {
+  id        Int      @id @default(autoincrement())
+  tripId    String
+  driverId  Int
+  createdAt DateTime @default(now())
+
+  trip      Trip     @relation(fields: [tripId], references: [id])
+  // driver    User     @relation(fields: [driverId], references: [id]) // Nếu có model User/Driver
+
+  @@unique([tripId, driverId]) 
+}
+
+model Rating {
+    id          String   @id @default(cuid())
+    tripId      String   @unique
+    trip        Trip     @relation(fields: [tripId], references: [id])
+    passengerId Int
+    driverId    Int
+    rating      Int // Từ 1-5 sao 
+    comment     String?
+    createdAt   DateTime @default(now())
+
+    @@map("ratings")
+}
