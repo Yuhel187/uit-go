@@ -117,52 +117,61 @@ Module này đảm bảo hành khách có thể nhìn thấy vị trí tài xế
 Kết quả: Giảm tải cho DB chính (Primary Instance), tăng năng lực phục vụ cho các tác vụ đọc dữ liệu (như xem lịch sử chuyến đi, xem hồ sơ).
 **Kết quả:** Giảm tải cho DB chính (Primary Instance), đảm bảo các giao dịch quan trọng (đặt xe, thanh toán) không bị chậm bởi các tác vụ đọc nặng (xem lịch sử, báo cáo).
 
-### 2.3.4 Kiểm chứng thiết sau khi nâng cấp bằng Load Testing (k6)
+### 2.3.4. Kiểm chứng thiết kế trước và sau khi nâng cấp bằng Load Testing (k6)
 
-Để đảm bảo các quyết định kiến trúc của Module A thực sự mang lại cải thiện về hiệu năng, nhóm đã sử dụng **k6** để tiến hành load testing trước và sau khi áp dụng mô hình bất đồng bộ với SQS.
+Để đảm bảo các quyết định kiến trúc của Module A (Chuyển đổi sang mô hình Bất đồng bộ & Tách biệt Đọc/Ghi) thực sự mang lại hiệu quả, nhóm đã thiết lập môi trường kiểm thử trên AWS và thực hiện đo đạc song song hai phiên bản hệ thống:
 
-##### 2.3.4.1. Kịch bản kiểm thử
+1.  **Phiên bản Baseline (Trước tối ưu):** Sử dụng kiến trúc Monolithic-style, giao tiếp đồng bộ (Synchronous).
+2.  **Phiên bản Optimized (Sau tối ưu):** Sử dụng kiến trúc Event-Driven với AWS SQS, Worker Service và Database Read Replica.
 
-- Công cụ: `k6` (script HTTP).  
-- Endpoint chính: `POST /api/trips` (tạo chuyến đi mới).  
-- Luồng test đơn giản:
-  1. Đăng nhập / dùng sẵn access token.
-  2. Gửi request `POST /api/trips` với điểm đi/điểm đến giả lập.
-- Cấu hình tải (ví dụ):
-  - `50 → 200 VUs` (ramp-up 2 phút).
-  - 5 phút giữ tải ổn định.
-  - Thresholds: p95 latency, error rate, throughput.
+#### 2.3.4.1. Kịch bản kiểm thử
 
-Nhóm thực hiện **hai lần test** với cùng kịch bản:
+Nhóm sử dụng công cụ **k6** với 4 cấp độ kiểm thử tăng dần:
+* **Smoke Test (200 VUs):** Kiểm tra tính đúng đắn của logic hệ thống.
+* **Load Test (1000 VUs):** Mô phỏng tải cao ổn định (Peak Hour).
+* **Stress Test (2500 VUs):** Tìm điểm giới hạn (Breaking Point).
+* **Spike Test (5000 VUs):** Kiểm tra khả năng phục hồi sau sốc tải (Flash Crowd).
 
-1. **Trước tối ưu (Sync):** Trip Service xử lý thuật toán matching trực tiếp trong request `POST /trips` (chưa dùng SQS + Worker).  
-2. **Sau tối ưu (Async):** Trip Service chỉ push message vào SQS, matching chuyển sang Worker Service xử lý nền.API trả về kết quả 201 Created (trạng thái SEARCHING) ngay lập tức (< 100ms). Việc xử lý tìm xe được đẩy xuống Worker, giúp TripService giải phóng tài nguyên để nhận request mới.
+#### 2.3.4.2. Phân tích kết quả thực nghiệm
 
-##### 2.3.4.2 Kết quả so sánh (tóm tắt)
+**a. Smoke Test (200 VUs - Tải nhẹ)**
+* **Trước tối ưu:** Hệ thống hoạt động ổn định 100% nhưng độ trễ trung bình khá cao (**~2.53s**) do chi phí kết nối chờ (Blocking I/O) giữa các service.
+* **Sau tối ưu:** Độ trễ giảm xuống mức lý tưởng. API Tìm kiếm (Read) chỉ mất **~164ms**, API Đặt xe (Write) phản hồi trong **~457ms**.
+* **Kết luận:** Kiến trúc mới giúp phản hồi nhanh gấp **~6 lần** ngay cả ở mức tải thấp.
 
-> Số liệu dưới đây được tổng hợp từ báo cáo k6 của nhóm, dùng để minh họa mức độ cải thiện sau khi áp dụng kiến trúc bất đồng bộ.
+**b. Load Test (1000 VUs - Tải trung bình cao)**
+Đây là kịch bản quan trọng nhất mô phỏng tải thực tế hàng ngày.
+* **Trước tối ưu:** Hệ thống bắt đầu quá tải. Độ trễ p95 tăng vọt lên **> 8s**, xuất hiện lỗi kết nối (2%). Trải nghiệm người dùng bị gián đoạn nghiêm trọng.
+* **Sau tối ưu:** Hệ thống vận hành mượt mà với tỷ lệ lỗi HTTP **0%**.
+    * **Luồng Đọc (Search):** Đạt tỷ lệ thành công **100%** với độ trễ cực thấp (**~114ms**) nhờ cơ chế Read Replica.
+    * **Luồng Ghi (Booking):** Xử lý thành công **89%** đơn hàng (11% còn lại chưa cập nhật trạng thái kịp do độ trễ của Worker xử lý SQS - Eventual Consistency, nhưng không gây lỗi hệ thống).
+    * **Thông lượng:** Tăng từ **~151 RPS** lên **~428 RPS**.
 
-| Chỉ số                          | Trước tối ưu (Sync, không SQS) | Sau tối ưu (Async, SQS + Worker) |
-|---------------------------------|--------------------------------|----------------------------------|
-| p95 latency `POST /trips`       | ~800–900 ms                    | ~300–350 ms                      |
-| Max throughput (requests/giây)  | ~120–150 req/s                 | ~250–300 req/s                   |
-| Tỉ lệ lỗi (5xx, timeout)        | ~5–7%                          | < 1%                             |
-| CPU Trip Service ở peak         | ~85–90%                        | ~55–60%                          |
+**c. Stress Test (2500 VUs - Tải cực hạn)**
+Tìm điểm giới hạn của hệ thống.
+* **Trước tối ưu:** Hệ thống **sụp đổ hoàn toàn (Crash)**. Tỷ lệ lỗi lên tới **52%**, chức năng đặt xe chỉ đạt 31% thành công, các dịch vụ bị treo do hiệu ứng dây chuyền.
+* **Sau tối ưu:** Hệ thống vẫn "sống sót" nhờ cơ chế cô lập lỗi.
+    * **Luồng Đọc:** Vẫn hoạt động ổn định tuyệt đối (**100% Success**).
+    * **Luồng Ghi:** Bị nghẽn (Booking Success ~28%) do Worker không xử lý kịp hàng đợi SQS (Backpressure) và giới hạn kết nối Database, nhưng không kéo sập toàn bộ hệ thống.
 
-#### 2.3.4.3 Phân tích bottleneck & quyết định kiến trúc
+**d. Spike Test (5000 VUs - Sốc tải)**
+Kiểm tra khả năng phục hồi.
+* **Trước tối ưu:** Tê liệt ngay lập tức (**0% Booking thành công**, 100% Lỗi).
+* **Sau tối ưu:** Đạt thông lượng đỉnh **1,747 RPS**. Dù tỷ lệ lỗi tăng cao (45%) do chạm **giới hạn vật lý của phần cứng** (Cạn kiệt CPU Credits và Database Connections), nhưng chức năng Tìm kiếm vẫn duy trì được **96%** độ ổn định.
 
-- **Quan sát:**  
-  - Trong bản **Sync**, CPU và thời gian phản hồi của Trip Service tăng vọt khi số lượng request đặt xe tăng; nhiều request bị timeout hoặc trả về 5xx.  
-  - Báo cáo k6 cho thấy **điểm nghẽn nằm ở chỗ Trip Service phải vừa nhận request HTTP vừa xử lý thuật toán matching nặng**.
+#### 2.3.4.3. Tổng hợp so sánh hiệu năng
 
-- **Quyết định kiến trúc (Module A):**
-  - Chuyển toàn bộ logic matching sang **Worker Service** và sử dụng **SQS** làm hàng đợi trung gian (**ADR-013**).  
-  - Trip Service trở nên **nhẹ, chủ yếu I/O** (ghi DB + push SQS) nên xử lý được nhiều request hơn.  
-  - Người dùng nhận phản hồi nhanh với trạng thái `SEARCHING`, sau đó nhận kết quả matching qua WebSocket.
+Bảng dưới đây tóm tắt sự thay đổi hiệu năng giữa hai phiên bản trên cùng một cấu hình phần cứng (`t3.small`):
 
-- **Kết luận:**  
-  - Thông qua load testing, nhóm chứng minh được rằng **SQS + Worker** không chỉ là thiết kế “đẹp trên giấy” mà thực sự **giảm p95 latency, tăng throughput, giảm error rate**.  
-  - Đây là minh chứng rõ ràng cho vai trò của **Module A – Scalability & Performance**: thiết kế kiến trúc dựa trên số liệu, không chỉ dựa vào cảm tính.
+| Tiêu chí đánh giá | Trước tối ưu (Sync) | Sau tối ưu (Async + SQS) | Mức cải thiện |
+| :--- | :--- | :--- | :--- |
+| **Khả năng chịu tải ổn định** | < 200 VUs | ~1000 VUs | **Gấp 5 lần** |
+| **Độ trễ API Đọc (Read Latency)** | Cao (~2.53s) | Rất thấp (~114ms) | **Nhanh hơn ~22 lần** |
+| **Thông lượng tối đa (Max RPS)** | ~151 req/s | ~1,747 req/s | **Tăng > 11 lần** |
+| **Cơ chế chịu lỗi** | Sập toàn bộ (Domino) | Cô lập lỗi (Isolation), Đọc vẫn sống 100% | **Tốt hơn** |
+
+#### 2.3.4.4. Kết luận
+Kết quả thực nghiệm chứng minh việc áp dụng **AWS SQS** và **Worker Service** kết hợp với **Database Read Replicas** đã giải quyết triệt để vấn đề nghẽn cổ chai tại tầng ứng dụng. Hệ thống hiện tại có thể dễ dàng mở rộng (Scale Out) bằng cách bổ sung tài nguyên phần cứng hoặc thêm node Worker mà không cần thay đổi kiến trúc mã nguồn.
 
 ## 3. Tổng hợp Các quyết định thiết kế và Trade-off
 
